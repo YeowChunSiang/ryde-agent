@@ -78,16 +78,45 @@ class DisputeStatus(str, Enum):
     ESCALATED = "escalated"
 
 
+class SLAPriority(str, Enum):
+    """Triage band assigned by the SLA & Routing Manager.
+
+    Drives queue ordering and the resolution deadline. ``CRITICAL`` is reserved
+    for safety incidents, which are fast-tracked and always human-reviewed.
+    """
+
+    CRITICAL = "critical"
+    HIGH = "high"
+    NORMAL = "normal"
+    LOW = "low"
+
+
+class RoutingStatus(str, Enum):
+    """Where the ticket sits in the routing lifecycle."""
+
+    QUEUED = "queued"
+    FAST_TRACKED = "fast_tracked"
+    IN_ARBITRATION = "in_arbitration"
+    AUTO_RESOLVED = "auto_resolved"
+    ESCALATED_TO_HUMAN = "escalated_to_human"
+    OVERRIDDEN = "overridden"
+
+
 class AgentRole(str, Enum):
     """Agents participating in the arbitration pipeline."""
 
     ORCHESTRATOR = "orchestrator"
+    SLA_ROUTER = "sla_router"
+    EVIDENCE_COLLECTION = "evidence_collection"
     EVIDENCE = "evidence"
+    FRAUD = "fraud"
+    POLICY = "policy"
     VISION = "vision"
     RIDER_ADVOCATE = "rider_advocate"
     DRIVER_ADVOCATE = "driver_advocate"
     JUDGE = "judge"
     ESCALATION = "escalation"
+    LEARNING = "learning"
 
 
 class Decision(str, Enum):
@@ -274,6 +303,19 @@ class DisputeCase(_Domain):
     cancellation_policy: Optional[CancellationPolicy] = None
     media_attachments: list[MediaAttachment] = Field(default_factory=list)
 
+    # --- SLA & Routing Manager (pre-processing layer) ----------------------
+    sla_priority: Optional[SLAPriority] = Field(
+        default=None,
+        description="Set by the caller to override triage; otherwise derived from dispute type",
+    )
+    routing_status: RoutingStatus = Field(
+        default=RoutingStatus.QUEUED,
+        description="Lifecycle position assigned by the SLA & Routing Manager",
+    )
+    sla_due_at: Optional[datetime] = Field(
+        default=None, description="Resolution deadline derived from the priority band"
+    )
+
     @property
     def dispute_id(self) -> str:
         return self.dispute_ticket.dispute_id
@@ -332,6 +374,141 @@ class EvidencePacket(_Strict):
 
     def facts_for(self, party: Literal["rider", "driver"]) -> list[Fact]:
         return [f for f in self.facts if f.supports == party]
+
+
+# ---------------------------------------------------------------------------
+# Pre-processing layer: SLA routing, evidence ingestion, risk & precedent
+# ---------------------------------------------------------------------------
+
+
+class SLARoutingDecision(_Strict):
+    """Triage verdict from the SLA & Routing Manager (pre-processing layer)."""
+
+    dispute_id: str
+    priority: SLAPriority
+    routing_status: RoutingStatus
+    fast_tracked: bool
+    queue: str
+    queue_position: int
+    sla_target_minutes: float
+    sla_due_at: datetime
+    reasons: list[str] = Field(default_factory=list)
+
+
+class CollectionRecord(_Strict):
+    """One upstream source fetched by the Evidence Collection Agent."""
+
+    source: str
+    endpoint: str
+    records: int = 0
+    latency_ms: int = 0
+    status: Literal["ok", "degraded", "empty", "failed"] = "ok"
+    note: Optional[str] = None
+
+
+class CollectionManifest(_Strict):
+    """Aggregated ingestion report from the Evidence Collection Agent."""
+
+    dispute_id: str
+    sources: list[CollectionRecord] = Field(default_factory=list)
+    total_records: int = 0
+    total_latency_ms: int = 0
+    degraded: bool = False
+    summary: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return not self.degraded
+
+
+class FraudAssessment(_Strict):
+    """Structured verdict from the Fraud & Bad-Faith Detection Agent."""
+
+    dispute_id: str
+    risk_score: float = Field(default=0.0, ge=0, le=1)
+    verdict: Literal["none", "low", "suspected", "likely", "confirmed"] = "none"
+    rider_risk: float = Field(default=0.0, ge=0, le=1)
+    driver_risk: float = Field(default=0.0, ge=0, le=1)
+    signals: list[RiskSignal] = Field(default_factory=list)
+    recommended_action: str = ""
+    policy_refs: list[str] = Field(default_factory=list)
+    reasoning: str = ""
+
+
+class PrecedentCase(_Strict):
+    """A historical ruling held in the mock RAG knowledge base."""
+
+    precedent_id: str = Field(default_factory=lambda: _new_id("prec"))
+    dispute_type: DisputeType
+    title: str
+    fact_signature: dict[str, Any] = Field(default_factory=dict)
+    summary: str
+    ruling: str
+    amount: float = 0.0
+    source: Literal["seed", "human_override"] = "seed"
+    created_at: datetime = Field(default_factory=_utcnow)
+    learned_from_run_id: Optional[str] = None
+    reviewer_note: Optional[str] = None
+
+
+class PrecedentMatch(_Strict):
+    """A retrieved precedent plus why it matched and what it suggests."""
+
+    precedent: PrecedentCase
+    similarity: float = Field(default=0.0, ge=0, le=1)
+    matched_on: list[str] = Field(default_factory=list)
+    recommendation: str = ""
+
+
+class PrecedentBundle(_Strict):
+    """Retrieval result handed to the Judge for consistency enforcement."""
+
+    dispute_id: str
+    matches: list[PrecedentMatch] = Field(default_factory=list)
+    retrieved_count: int = 0
+    consistency_note: str = ""
+
+
+class EscalationPacket(_Strict):
+    """Everything a human reviewer needs, assembled post-ruling."""
+
+    run_id: str
+    dispute_id: str
+    priority: SLAPriority
+    queue: str
+    sla_due_at: Optional[datetime] = None
+    routed_to: str = "human_review_queue"
+    case_summary: str = ""
+    evidence_digest: list[str] = Field(default_factory=list)
+    conflicting_points: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    judge_recommendation: str = ""
+    recommended_focus: list[str] = Field(default_factory=list)
+
+
+class OverrideRequest(_Strict):
+    """Human reviewer correction to an escalated ruling."""
+
+    reviewer_id: str
+    decision: Decision
+    amount: float = Field(default=0.0, ge=0)
+    rationale: str = Field(min_length=1)
+    add_to_knowledge_base: bool = True
+    tags: list[str] = Field(default_factory=list)
+
+
+class OverrideAccepted(_Strict):
+    """Response to an override — confirms the knowledge base absorbed it."""
+
+    run_id: str
+    dispute_id: str
+    status: Literal["overridden"] = "overridden"
+    previous_decision: Optional[str] = None
+    new_decision: Decision
+    new_amount: float = 0.0
+    precedent_id: Optional[str] = None
+    knowledge_base_size: int = 0
+    message: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -403,11 +580,17 @@ class ResolutionResult(_Strict):
     dispute_type: DisputeType
     status: DisputeStatus
     engine: Literal["adp", "offline"] = "offline"
+    routing: Optional[SLARoutingDecision] = None
+    collection: Optional[CollectionManifest] = None
     evidence: Optional[EvidencePacket] = None
+    fraud: Optional[FraudAssessment] = None
+    precedents: Optional[PrecedentBundle] = None
     vision: list[VisionFinding] = Field(default_factory=list)
     rider_argument: Optional[AdvocateArgument] = None
     driver_argument: Optional[AdvocateArgument] = None
     ruling: Optional[Ruling] = None
+    escalation: Optional[EscalationPacket] = None
+    override: Optional[OverrideAccepted] = None
     started_at: datetime = Field(default_factory=_utcnow)
     finished_at: Optional[datetime] = None
     duration_ms: Optional[int] = None
@@ -440,6 +623,11 @@ class DisputeAccepted(_Strict):
     stream_url: str
     result_url: str
     engine: Literal["adp", "offline"]
+    # SLA triage assigned the moment the ticket was accepted.
+    sla_priority: Optional[SLAPriority] = None
+    fast_tracked: bool = False
+    queue: Optional[str] = None
+    sla_due_at: Optional[datetime] = None
 
 
 class CaseSummary(_Strict):

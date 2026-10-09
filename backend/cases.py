@@ -9,11 +9,16 @@ DISP-002   no_show_charge                The official hackathon sample (expected
 DISP-001   route_deviation               Second required text category (expected: PARTIAL REFUND)
 DISP-003   property_damage               Multi-modal vision agent *rejecting* fabricated evidence
 DISP-004   property_damage               Multi-modal vision agent *accepting* valid evidence
+DISP-005   safety_incident               CRITICAL SLA fast-track + mandatory human escalation
 =========  ============================  ==========================================
 
 DISP-003/004 exist as a pair on purpose: they prove the judge is not biased
 against drivers — the same vision pipeline that voids a fabricated cleaning claim
 also awards a legitimate one.
+
+DISP-005 exercises the Phase 2 safety net end to end: the SLA & Routing Manager
+tags it CRITICAL and jumps the queue, and the escalation protocol halts
+autonomous arbitration regardless of how confident the Judge is.
 """
 
 from __future__ import annotations
@@ -414,11 +419,168 @@ DISP_004: dict[str, Any] = {
 # Registry
 # ---------------------------------------------------------------------------
 
+#: Safety incident — exercises the CRITICAL fast-track and the always-escalate
+#: rule. The rider is also a high-frequency disputant, so the fraud agent has
+#: something to say while the escalation protocol still halts autonomous
+#: arbitration: a safety allegation is never auto-resolved, whatever the risk
+#: score says.
+DISP_005: dict[str, Any] = {
+    "dispute_ticket": {
+        "dispute_id": "DISP-005",
+        "trip_id": "RY-20240519-77120",
+        "filed_by": "rider",
+        "dispute_type": "safety_incident",
+        "description": (
+            "The driver was doing well over the speed limit on the CTE and brake-checked me "
+            "twice after I asked him to slow down. I genuinely feared for my safety and want "
+            "this driver reviewed before he hurts someone."
+        ),
+        "filed_at": "2024-05-19T22:10:00+00:00",
+        "status": "open",
+    },
+    "rider_profile": {
+        "rider_id": "R-55219",
+        "name": "Wei Ling Tan",
+        "account_age_days": 210,
+        "total_trips": 48,
+        "avg_rating": 4.7,
+        "dispute_history": {"total_disputes": 7, "upheld": 2, "rejected": 5},
+        "fraud_flags": 0,
+        "payment_method": "visa_4412",
+    },
+    "driver_profile": {
+        "driver_id": "D-30887",
+        "name": "Ahmad bin Rahman",
+        "account_age_days": 900,
+        "total_trips": 3120,
+        "avg_rating": 4.6,
+        "dispute_history": {"total_disputes": 1, "upheld_against": 0, "rejected": 1},
+        "fraud_flags": 0,
+        "vehicle": "Toyota Prius (SLC 4521E)",
+    },
+    "trip_data": {
+        "trip_id": "RY-20240519-77120",
+        "rider_id": "R-55219",
+        "driver_id": "D-30887",
+        "pickup_location": {"name": "Clarke Quay MRT", "lat": 1.2886, "lng": 103.8460},
+        "dropoff_location": {"name": "Bishan MRT", "lat": 1.3509, "lng": 103.8352},
+        "trip_start_time": "2024-05-19T21:41:00+00:00",
+        "trip_end_time": "2024-05-19T22:04:00+00:00",
+        "estimated_distance_km": 11.2,
+        "actual_distance_km": 11.6,
+        "estimated_duration_min": 22,
+        "actual_duration_min": 23,
+        "fare_estimate": 23.00,
+        "fare_charged": 24.50,
+    },
+    "gps_telemetry": [
+        {
+            "timestamp": "2024-05-19T21:42:00+00:00",
+            "lat": 1.2901,
+            "lng": 103.8452,
+            "speed_kmh": 32,
+            "status": "en_route",
+        },
+        {
+            "timestamp": "2024-05-19T21:47:00+00:00",
+            "lat": 1.3125,
+            "lng": 103.8530,
+            "speed_kmh": 96,
+            "status": "en_route",
+        },
+        {
+            "timestamp": "2024-05-19T21:50:00+00:00",
+            "lat": 1.3261,
+            "lng": 103.8577,
+            "speed_kmh": 108,
+            "status": "en_route",
+        },
+        {
+            "timestamp": "2024-05-19T21:52:00+00:00",
+            "lat": 1.3352,
+            "lng": 103.8601,
+            "speed_kmh": 21,
+            "status": "harsh_braking",
+        },
+        {
+            "timestamp": "2024-05-19T21:56:00+00:00",
+            "lat": 1.3428,
+            "lng": 103.8489,
+            "speed_kmh": 88,
+            "status": "en_route",
+        },
+        {
+            "timestamp": "2024-05-19T21:59:00+00:00",
+            "lat": 1.3481,
+            "lng": 103.8402,
+            "speed_kmh": 18,
+            "status": "harsh_braking",
+        },
+        {
+            "timestamp": "2024-05-19T22:03:00+00:00",
+            "lat": 1.3509,
+            "lng": 103.8352,
+            "speed_kmh": 12,
+            "status": "arrived_dropoff",
+        },
+    ],
+    "chat_logs": [
+        {
+            "timestamp": "2024-05-19T21:49:00+00:00",
+            "sender": "rider",
+            "type": "message",
+            "content": "Could you slow down a bit please? You're going really fast.",
+        },
+        {
+            "timestamp": "2024-05-19T21:50:00+00:00",
+            "sender": "driver",
+            "type": "message",
+            "content": "We're late, ma'am. I know this road well, don't worry.",
+        },
+        {
+            "timestamp": "2024-05-19T21:53:00+00:00",
+            "sender": "rider",
+            "type": "message",
+            "content": "That braking was deliberate. Please drive normally or let me out.",
+        },
+        {
+            "timestamp": "2024-05-19T21:54:00+00:00",
+            "sender": "driver",
+            "type": "message",
+            "content": "There was a car cutting in. I had to brake.",
+        },
+    ],
+    "app_events": [
+        {
+            "timestamp": "2024-05-19T21:52:10+00:00",
+            "event_type": "harsh_braking_detected",
+            "details": "Deceleration 7.4 m/s² — flagged by the telematics SDK",
+        },
+        {
+            "timestamp": "2024-05-19T21:59:05+00:00",
+            "event_type": "harsh_braking_detected",
+            "details": "Deceleration 6.9 m/s² — flagged by the telematics SDK",
+        },
+        {
+            "timestamp": "2024-05-19T22:01:00+00:00",
+            "event_type": "speed_limit_exceeded",
+            "details": "108 km/h in a 90 km/h zone for 40 s",
+        },
+        {
+            "timestamp": "2024-05-19T22:10:00+00:00",
+            "event_type": "dispute_filed",
+            "details": "Rider selected category 'safety_incident'",
+        },
+    ],
+}
+
+
 CASE_REGISTRY: dict[str, dict[str, Any]] = {
     "DISP-001": DISP_001,
     "DISP-002": DISP_002,
     "DISP-003": DISP_003,
     "DISP-004": DISP_004,
+    "DISP-005": DISP_005,
 }
 
 CASE_META: dict[str, dict[str, str]] = {
@@ -441,6 +603,14 @@ CASE_META: dict[str, dict[str, str]] = {
         "title": "Property Damage — verified spill",
         "blurb": "Driver claims $60 with a photo taken at dropoff; rider admits the spill.",
         "expected_ruling": "COMPENSATE DRIVER — $60 cleaning fee awarded",
+    },
+    "DISP-005": {
+        "title": "Safety Incident — alleged dangerous driving",
+        "blurb": (
+            "Rider alleges speeding and deliberate brake-checking; telematics logged two "
+            "harsh-braking events. CRITICAL — fast-tracked and always human-reviewed."
+        ),
+        "expected_ruling": "ESCALATED TO HUMAN — safety incidents are never auto-resolved",
     },
 }
 

@@ -772,6 +772,89 @@ def _analyse_risk(case: DisputeCase, packet: EvidencePacket) -> None:
 # --- Public entrypoint ---------------------------------------------------------
 
 
+def _analyse_safety_incident(case: DisputeCase, packet: EvidencePacket) -> None:
+    """Corroborate (or undercut) a safety allegation against the telematics.
+
+    This never produces a verdict — safety is outside the autonomy boundary —
+    but it hands the human investigator the sensor facts up front.
+    """
+    speeds = [p.speed_kmh for p in case.gps_telemetry if p.speed_kmh is not None]
+    peak = max(speeds) if speeds else 0.0
+    if speeds:
+        packet.facts.append(
+            Fact(
+                key="peak_recorded_speed",
+                label="Peak speed recorded during the trip",
+                value=round(peak, 1),
+                unit="km/h",
+                source="gps_telemetry",
+                supports="rider" if peak >= 90 else "neutral",
+                note="Above the 90 km/h expressway limit" if peak >= 90 else None,
+            )
+        )
+
+    braking = [e for e in case.app_events if e.event_type == "harsh_braking_detected"]
+    packet.facts.append(
+        Fact(
+            key="harsh_braking_events",
+            label="Harsh-braking events logged by telematics",
+            value=len(braking),
+            unit="events",
+            source="app_events",
+            supports="rider" if braking else "driver",
+            note=braking[0].details if braking and braking[0].details else None,
+        )
+    )
+
+    speeding = [e for e in case.app_events if e.event_type == "speed_limit_exceeded"]
+    if speeding:
+        packet.facts.append(
+            Fact(
+                key="speed_limit_breaches",
+                label="Speed-limit breaches logged by telematics",
+                value=len(speeding),
+                unit="events",
+                source="app_events",
+                supports="rider",
+                note=speeding[0].details if speeding[0].details else None,
+            )
+        )
+
+    # Did the rider actually ask the driver to slow down? That distinguishes a
+    # safety complaint from a post-hoc fare grievance.
+    asked = [
+        m
+        for m in case.chat_logs
+        if m.sender == "rider" and any(k in m.content.lower() for k in ("slow", "speed", "fast"))
+    ]
+    packet.facts.append(
+        Fact(
+            key="rider_speed_complaints",
+            label="In-trip complaints about speed from the rider",
+            value=len(asked),
+            unit="messages",
+            source="chat_logs",
+            supports="rider" if asked else "driver",
+            note=asked[0].content if asked else "No in-trip speed complaint found in the chat log",
+        )
+    )
+
+    packet.policy_checks.append(
+        PolicyCheck(
+            ref="SAFETY-1",
+            description="Safety incidents must be escalated to a human reviewer",
+            expected="Routed to human review, no autonomous ruling",
+            actual=(
+                f"{len(braking)} harsh-braking and {len(speeding)} speeding event(s) logged"
+                if (braking or speeding)
+                else "No telematics corroboration found"
+            ),
+            compliant=False,
+            supports="neutral",
+        )
+    )
+
+
 def extract_evidence(case: DisputeCase) -> EvidencePacket:
     """Build the auditable evidence packet for a dispute dossier."""
     packet = EvidencePacket(
@@ -785,6 +868,8 @@ def extract_evidence(case: DisputeCase) -> EvidencePacket:
         _analyse_route_deviation(case, packet)
     elif dtype == "property_damage":
         _analyse_property_damage(case, packet)
+    elif dtype == "safety_incident":
+        _analyse_safety_incident(case, packet)
     else:
         _analyse_no_show(case, packet)
 

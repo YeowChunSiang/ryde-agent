@@ -3,14 +3,16 @@ import { AlertTriangle, CheckCircle2, Gavel, Timer } from "lucide-react";
 import type { ResolutionResult, Ruling } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { DECISION_META, formatDuration, titleCase } from "./agent-meta";
+import { DECISION_META, PRIORITY_META, formatDuration, titleCase } from "./agent-meta";
 import { cn } from "@/lib/utils";
 
 interface Props {
   result: ResolutionResult | null;
+  /** Configurable autonomy threshold reported by /health. */
+  threshold?: number;
 }
 
-export function VerdictPanel({ result }: Props) {
+export function VerdictPanel({ result, threshold = 0.7 }: Props) {
   if (!result?.ruling) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 py-16 text-muted-foreground">
@@ -32,6 +34,18 @@ export function VerdictPanel({ result }: Props) {
           {ruling.amount > 0 && (
             <span className="font-mono text-lg font-bold">S${ruling.amount.toFixed(2)}</span>
           )}
+          {result.routing && (
+            <Badge
+              variant="outline"
+              className={cn(
+                "ml-auto h-5 px-1.5 text-[10px]",
+                PRIORITY_META[result.routing.priority].className,
+              )}
+            >
+              {PRIORITY_META[result.routing.priority].label}
+              {result.routing.fast_tracked ? " · FAST-TRACK" : ""}
+            </Badge>
+          )}
         </div>
         <p className="mt-1 text-xs opacity-80">{meta.description}</p>
 
@@ -42,7 +56,7 @@ export function VerdictPanel({ result }: Props) {
           </div>
           <Progress value={confidencePct} className="mt-1.5 h-1.5" />
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Autonomy threshold 65% — below it a human reviewer takes over.
+            Autonomy threshold {Math.round(threshold * 100)}% — below it a human reviewer takes over.
           </p>
         </div>
       </div>

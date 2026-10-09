@@ -1,8 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Cpu, Play, Server } from "lucide-react";
 
-import type { AgentEvent, CaseSummary, Health, ResolutionResult } from "@/types";
-import { fetchCases, fetchHealth, fetchResult, startDispute, subscribeToRun } from "@/lib/api";
+import type {
+  AgentEvent,
+  CaseSummary,
+  Health,
+  PrecedentCase,
+  ResolutionResult,
+} from "@/types";
+import {
+  fetchCases,
+  fetchHealth,
+  fetchPrecedents,
+  fetchResult,
+  startDispute,
+  subscribeToRun,
+} from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,6 +25,8 @@ import { AgentStream } from "@/components/AgentStream";
 import { EvidencePanel } from "@/components/EvidencePanel";
 import { AdvocatesPanel } from "@/components/AdvocatesPanel";
 import { VerdictPanel } from "@/components/VerdictPanel";
+import { RiskPanel } from "@/components/RiskPanel";
+import { EscalationPanel } from "@/components/EscalationPanel";
 import { titleCase } from "@/components/agent-meta";
 
 export default function Index() {
@@ -23,6 +38,7 @@ export default function Index() {
   const [streaming, setStreaming] = useState(false);
   const [tab, setTab] = useState("verdict");
   const [error, setError] = useState<string | null>(null);
+  const [library, setLibrary] = useState<PrecedentCase[] | null>(null);
 
   const cleanupRef = useRef<(() => void) | null>(null);
 
@@ -37,9 +53,24 @@ export default function Index() {
         if (list.length) setSelected(list[1]?.case_id ?? list[0].case_id);
       })
       .catch((err) => setError(String(err)));
+    fetchPrecedents()
+      .then((lib) => setLibrary(lib.precedents))
+      .catch(() => setLibrary(null));
 
     return () => cleanupRef.current?.();
   }, []);
+
+  // A human override writes a new precedent — refresh both the run result and
+  // the knowledge base so the learning loop is visible immediately.
+  const onOverridden = async (runId: string) => {
+    try {
+      const [fresh, lib] = await Promise.all([fetchResult(runId), fetchPrecedents()]);
+      setResult(fresh);
+      setLibrary(lib.precedents);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
 
   const activeCase = cases.find((c) => c.case_id === selected) ?? null;
 
@@ -117,6 +148,15 @@ export default function Index() {
               {health.adp_configured ? "ADP connected" : "offline reasoner"}
             </Badge>
           )}
+          {library && (
+            <Badge
+              variant="outline"
+              className="h-6 border-lime-500/30 bg-lime-500/10 font-mono text-[10px] text-lime-300"
+              title="Policy & Precedent knowledge base"
+            >
+              KB: {library.length} precedents
+            </Badge>
+          )}
           <Button onClick={run} disabled={!selected || streaming} size="sm" className="h-8">
             <Play className="h-3.5 w-3.5" />
             {streaming ? "Arbitrating…" : "Run Arbitration"}
@@ -180,11 +220,14 @@ export default function Index() {
             <aside className="flex min-h-0 shrink-0 flex-col xl:w-[27rem]">
               <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
                 <div className="border-b border-border px-4 py-2.5">
-                  <TabsList className="grid w-full grid-cols-3">
-                    <TabsTrigger value="evidence" className="text-xs">
+                  <TabsList className="grid w-full grid-cols-4">
+                    <TabsTrigger value="evidence" className="px-1 text-xs">
                       Evidence
                     </TabsTrigger>
-                    <TabsTrigger value="arguments" className="text-xs">
+                    <TabsTrigger value="risk" className="px-1 text-xs">
+                      Risk & RAG
+                    </TabsTrigger>
+                    <TabsTrigger value="arguments" className="px-1 text-xs">
                       Arguments
                     </TabsTrigger>
                     <TabsTrigger value="verdict" className="text-xs">
@@ -200,6 +243,15 @@ export default function Index() {
                       vision={result?.vision ?? []}
                     />
                   </TabsContent>
+                  <TabsContent value="risk" className="mt-0">
+                    <RiskPanel
+                      routing={result?.routing ?? null}
+                      collection={result?.collection ?? null}
+                      fraud={result?.fraud ?? null}
+                      precedents={result?.precedents ?? null}
+                      library={library}
+                    />
+                  </TabsContent>
                   <TabsContent value="arguments" className="mt-0">
                     <AdvocatesPanel
                       rider={result?.rider_argument ?? null}
@@ -207,7 +259,11 @@ export default function Index() {
                     />
                   </TabsContent>
                   <TabsContent value="verdict" className="mt-0">
-                    <VerdictPanel result={result} />
+                    <VerdictPanel
+                      result={result}
+                      threshold={health?.escalation_threshold ?? 0.7}
+                    />
+                    <EscalationPanel result={result} onOverridden={onOverridden} />
                   </TabsContent>
                 </div>
               </Tabs>

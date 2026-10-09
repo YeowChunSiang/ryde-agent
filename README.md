@@ -23,21 +23,32 @@ flowchart LR
 
     subgraph Backend [FastAPI service :3000]
         POST[POST /dispute]
+        OVR[POST /override/{run_id}]
         SSE[GET /stream/{run_id}]
         ORCH[Orchestrator<br/>deterministic state machine]
+        SLA[SLA & Routing Manager]
+        COL[Evidence Collection Agent<br/>async upstream fan-out]
         EVD[Evidence Engine<br/>pure Python]
+        FRD[Fraud & Bad-Faith Agent]
+        PRC[Policy & Precedent Agent<br/>mock RAG]
         VIS[Image Analysis Agent]
         RAD[Rider Advocate]
         DAD[Driver Advocate]
         JDG[Judge Agent]
         ESC[Escalation Gate]
-        LLM{{Tencent Cloud ADP<br/>wss.lke.lke.tencentcloud.com}}
+        LRN[Learning Feedback Loop]
+        LLM{{Tencent Cloud ADP<br/>wss.lke.tencentcloud.com}}
         OFF[Offline Reasoner<br/>deterministic fallback]
     end
 
     UI -- HTTP --> POST
+    UI -- HTTP --> OVR
     UI -- SSE --> SSE
-    POST --> ORCH
+    POST --> SLA
+    SLA --> ORCH
+    ORCH -- parallel --> COL
+    ORCH -- parallel --> FRD
+    ORCH -- parallel --> PRC
     ORCH --> EVD
     ORCH --> VIS
     ORCH --> RAD
@@ -45,17 +56,28 @@ flowchart LR
     RAD --> LLM
     DAD --> LLM
     JDG --> LLM
+    FRD --> LLM
+    PRC --> LLM
     LLM -. failures .-> OFF
     RAD -. fallback .-> OFF
     DAD -. fallback .-> OFF
     JDG -. fallback .-> OFF
+    FRD -. fallback .-> OFF
+    PRC -. fallback .-> OFF
     ORCH --> JDG
-    ORCH --> ESC
-    SSE -- event:info/evidence/argument/ruling --> UI
+    JDG --> ESC
+    OVR --> LRN
+    LRN --> PRC
+    SSE -- event:info/evidence/argument/ruling/warning --> UI
 ```
 
 Every arrow above corresponds to a discrete, loggable state transition — the
 agents' conversation is observable in real time through the SSE stream.
+
+Pipeline order: **intake → SLA routing → (evidence + collection + fraud +
+precedent, run concurrently) → vision → parallel advocacy → arbitration →
+escalation gate**, with the override endpoint closing the loop back into the
+precedent knowledge base.
 
 ## Project layout
 
@@ -63,22 +85,25 @@ agents' conversation is observable in real time through the SSE stream.
 backend/
   main.py            FastAPI app, /api + / routes, CORS, optional static
   config.py          12-factor settings (env-driven)
-  models.py          Pydantic v2 schemas (DISP-002 + wire contracts)
+  models.py          Pydantic v2 schemas (SLA, risk, precedent, wire contracts)
   prompts.py         Agent system prompts + JSON output contracts
   evidence.py        Deterministic fact extraction (the auditable core)
+  agents.py          SLA router, collection agent, fraud agent, precedent RAG
   adp_client.py      LLMProvider protocol, ADP SSE client, OfflineReasoner
-  orchestrator.py    Async state pipeline, run broker, SSE generator
-  cases.py           DISP-001..004 sample datasets
-  main.py + uvicorn  :3000
+  orchestrator.py    Async state pipeline, run broker, SSE generator, overrides
+  cases.py           DISP-001..005 sample datasets
+  data/precedents.json  precedent knowledge base (gitignored, grows at runtime)
 frontend/
   src/
     pages/Index.tsx          main page
     components/CaseRail.tsx          left rail
-    components/PipelineRail.tsx      progress rail
+    components/PipelineRail.tsx      progress rail (9 stages)
     components/AgentStream.tsx       live SSE feed
-    components/EvidencePanel.tsx     facts + policy + risk
+    components/EvidencePanel.tsx     facts + policy + risk + vision
+    components/RiskPanel.tsx         SLA routing, collection, fraud, precedents
     components/AdvocatesPanel.tsx    rider vs driver cards
-    components/VerdictPanel.tsx      ruling + summary
+    components/VerdictPanel.tsx      ruling + confidence + summaries
+    components/EscalationPanel.tsx   escalation packet + human override form
     components/agent-meta.ts         shared color/metadata
     types/index.ts                   mirror of backend schemas
     lib/api.ts                       typed API + EventSource client
@@ -140,6 +165,16 @@ curl -N http://localhost:3000/api/stream/<run_id>
 
 # 4. Read the final ruling + evidence
 curl -s http://localhost:3000/api/result/<run_id> | jq
+
+# 5. Human override — writes the correction back as a precedent (learning loop)
+curl -s -X POST http://localhost:3000/api/override/<run_id> \
+  -H "Content-Type: application/json" \
+  -d '{"reviewer_id":"ops-1","decision":"partial_refund","amount":12.5,
+       "rationale":"Telemetry shows the driver waited less than the full window."}' | jq
+
+# 6. Inspect the knowledge base and the escalation queue
+curl -s http://localhost:3000/api/precedents | jq
+curl -s http://localhost:3000/api/escalations | jq
 ```
 
 ## Why an "evidence-first" design?
@@ -169,25 +204,44 @@ credentials — and so it can be A/B-tested against a baseline ruling
 
 ## Expected rulings for the built-in samples
 
-| Case       | Category        | Expected ruling                                     |
-| ---------- | --------------- | --------------------------------------------------- |
-| `DISP-001` | Route Deviation | **PARTIAL REFUND** — ~$5.60 (traffic justified part) |
-| `DISP-002` | No-Show Charge  | **CHARGE UPHELD** — driver met every policy clause   |
-| `DISP-003` | Property Damage | **NO ACTION** + escalated to Fraud & Safety (fake photo) |
-| `DISP-004` | Property Damage | **COMPENSATE DRIVER** — $60 cleaning fee awarded      |
+| Case       | Category        | Priority | Expected ruling                                     |
+| ---------- | --------------- | -------- | --------------------------------------------------- |
+| `DISP-001` | Route Deviation | normal   | **PARTIAL REFUND** — ~$5.60 (traffic justified part) |
+| `DISP-002` | No-Show Charge  | normal   | **CHARGE UPHELD** — driver met every policy clause   |
+| `DISP-003` | Property Damage | high     | **NO ACTION** + escalated to Fraud & Safety (fake photo) |
+| `DISP-004` | Property Damage | high     | **COMPENSATE DRIVER** — $60 cleaning fee awarded      |
+| `DISP-005` | Safety Incident | critical | **ESCALATED TO HUMAN** — never auto-resolved          |
 
 ## Stretch goals implemented
 
-* **Image Analysis Agent** (multi-modal, mocked) — forensic screen rejects
-  fabricated photos, admits genuine ones.
-* **Fraud & Bad-Faith Detection** — every case emits risk signals from
-  profiles, dispute history and evidence patterns.
-* **Escalation Protocol** — confidence below 65% (or safety-incident type)
-  routes the ruling to a human reviewer; DISP-003 demonstrates the
-  fraud-referral path.
-* **Escalation feedback hook** — every escalated case keeps its computed
-  ruling + evidence so a human override can be replayed against the
-  `Policy & Precedent` knowledge base (the hook lives in `_apply_escalation`).
+* **SLA & Routing Manager** (`agents.py`) — tags every ticket with a
+  `sla_priority` (critical/high/normal/low), a queue and an SLA due time
+  *before* arbitration starts. `safety_incident` and high-value claims are
+  fast-tracked; `DISP-005` lands in the `safety_escalations` queue as CRITICAL.
+* **Evidence Collection Agent** — an async fan-out that "queries" five upstream
+  services (trip, telemetry, messaging, mobile analytics, identity), reporting
+  per-source latency, record counts and degraded/failed status. It is a
+  data-ingestion orchestrator, not a text generator.
+* **Fraud & Bad-Faith Detection Agent** — scores `fraud_flags` +
+  `dispute_history` + evidence contradictions into a `FraudAssessment`
+  (risk score, verdict, per-party risk, `RiskSignal[]`) and hands it straight
+  to the judge.
+* **Policy & Precedent Agent** (mock RAG) — retrieves the top-k analogous past
+  rulings by fact-signature similarity and tells the judge how to stay
+  consistent; the knowledge base is a JSON store that grows at runtime.
+* **Escalation Protocol** — a gate right after the judge: confidence below
+  `CONFIDENCE_ESCALATION_THRESHOLD` (default 0.70) or an always-human dispute
+  type halts autonomy, sets `escalated_to_human` and emits a full
+  `EscalationPacket` (routing, evidence digest, conflicts, risk flags,
+  recommended focus).
+* **Learning Feedback Loop** — `POST /override/{run_id}` captures a reviewer's
+  decision and injects it into the precedent knowledge base as a new
+  `human_override` precedent, so the next analogous dispute is arbitrated
+  against what the reviewer actually decided. The UI shows the new precedent id
+  and the growing KB size.
+
+All six agents emit events on the SSE stream, and the console renders them in
+the 9-stage pipeline rail and the **Risk & RAG** tab.
 
 ## Environment
 
@@ -196,9 +250,15 @@ credentials — and so it can be A/B-tested against a baseline ruling
 | `ADP_APP_KEY`                    | (empty) | Tencent Cloud ADP credential; empty = offline    |
 | `ADP_ENDPOINT`                   | `https://wss.lke.tencentcloud.com/adp/v2/chat` | ADP chat URL     |
 | `ENGINE_MODE`                    | `auto`  | `auto` / `adp` / `offline`                       |
-| `CONFIDENCE_ESCALATION_THRESHOLD`| `0.65`  | Below this confidence the judge is overridden    |
+| `CONFIDENCE_ESCALATION_THRESHOLD`| `0.70`  | Below this confidence the judge is overridden    |
 | `AUTO_ESCALATE_DISPUTE_TYPES`    | `safety_incident` | Comma-separated dispute types always escalated |
 | `OFFLINE_DEMO_PACING_MS`         | `220`   | Per-step delay for the offline reasoner (demo only) |
+| `SLA_HIGH_VALUE_THRESHOLD`       | `50`    | Claim amount (SGD) that promotes a ticket to HIGH |
+| `COLLECTION_SIMULATE_LATENCY`    | `true`  | Emulate upstream API round-trips in the collection agent |
+| `COLLECTION_BASE_LATENCY_MS`     | `40`    | Base latency per upstream call                   |
+| `COLLECTION_JITTER_MS`           | `90`    | Random jitter added per upstream call            |
+| `PRECEDENT_TOP_K`                | `2`     | Precedents retrieved per dispute                 |
+| `PRECEDENT_STORE_PATH`           | (none)  | JSON file backing the knowledge base (persists across restarts) |
 | `PORT`                           | `3000`  | HTTP port                                        |
 
 ## Submitting to the hackathon

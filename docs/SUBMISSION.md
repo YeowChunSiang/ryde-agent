@@ -30,18 +30,23 @@ Fill the entries below into the submission form.
   opacity, scalability.
 
 ### Comprehensive solution design
-- **Business architecture:** four-agent arbitration pipeline (intake →
-  evidence → vision → parallel rider/driver advocates → judge) with a
-  human-in-the-loop escalation gate.
+- **Business architecture:** nine-agent arbitration pipeline (SLA routing →
+  evidence + collection + fraud + precedent in parallel → vision → parallel
+  rider/driver advocates → judge → escalation gate) with a human-in-the-loop
+  override that feeds a learning loop.
 - **Technical architecture:** pure Python 3.11 + FastAPI + Pydantic v2 +
   httpx; React 19 + Vite + shadcn/ui console. Tennet Cloud ADP for
   inference (with a deterministic offline reasoner fallback so the demo
   works without credentials).
-- **How prompts drive AI generation:** the four agent system prompts pin
-  every model call to a strict JSON output contract; the LLM is *only*
+- **How prompts drive AI generation:** every agent system prompt pins
+  its model call to a strict JSON output contract; the LLM is *only*
   allowed to argue over facts that Python already computed, never to
   invent them. The deterministic reasoning engine is A/B-comparable to
   the model output for a Responsible-AI baseline.
+- **Autonomy boundary:** SLA priority decides the queue, the fraud and
+  precedent agents feed the judge as context, and confidence below 70%
+  (or any safety incident) hands the case to a human with a full
+  escalation packet.
 
 ### Business value
 - Cuts average resolution time from 24–72 hours to **< 1 second** for
@@ -50,9 +55,12 @@ Fill the entries below into the submission form.
   (verifiable from the evidence packet).
 - **Auditable** to any rider or driver: every fact is tagged with its
   source and the party it supports.
-- **Safe** by construction: confidence below 65% (or any safety
+- **Safe** by construction: confidence below 70% (or any safety
   incident) is escalated to a human reviewer — the system never rules
   autonomously when unsure.
+- **Improves over time:** every human override is written back as a
+  precedent, so tomorrow's ruling on an analogous case is measured
+  against what the reviewer actually decided.
 - Implementation is **swappable**: drop in any LLM/agent framework
   the team prefers (LangChain, AutoGen, CrewAI, or a custom client).
   Our `LLMProvider` protocol is the seam.

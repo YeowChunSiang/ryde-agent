@@ -39,6 +39,8 @@ from models import (
     DisputeCase,
     DisputeRequest,
     EventLevel,
+    OverrideAccepted,
+    OverrideRequest,
     ResolutionResult,
 )
 from orchestrator import Orchestrator, RunBroker, event_stream
@@ -114,6 +116,7 @@ def _resolve_case(payload: DisputeRequest) -> DisputeCase:
 
 
 def _accepted(run) -> DisputeAccepted:
+    routing = run.routing
     return DisputeAccepted(
         run_id=run.run_id,
         dispute_id=run.case.dispute_id,
@@ -121,6 +124,10 @@ def _accepted(run) -> DisputeAccepted:
         stream_url=f"/api/stream/{run.run_id}",
         result_url=f"/api/result/{run.run_id}",
         engine=run.engine,  # type: ignore[arg-type]
+        sla_priority=routing.priority if routing else None,
+        fast_tracked=routing.fast_tracked if routing else False,
+        queue=routing.queue if routing else None,
+        sla_due_at=routing.sla_due_at if routing else None,
     )
 
 
@@ -166,6 +173,7 @@ async def health() -> dict:
         "adp_configured": settings.adp_configured,
         "escalation_threshold": settings.confidence_escalation_threshold,
         "demo_pacing_ms": settings.offline_demo_pacing_ms,
+        "knowledge_base_precedents": orchestrator.knowledge_base_size,
         "runs": len(broker.runs),
     }
 
@@ -188,11 +196,24 @@ async def create_dispute(payload: DisputeRequest) -> DisputeAccepted:
 
     Returns immediately with a ``run_id``; subscribe to ``/stream/{run_id}`` to
     watch the agents work in real time.
+
+    The SLA & Routing Manager intercepts the ticket here, *before* the run is
+    queued, so a safety incident is tagged CRITICAL and fast-tracked ahead of
+    whatever standard disputes are already waiting.
     """
     case = _resolve_case(payload)
     run = broker.create(case, orchestrator.engine)
+    run.routing = orchestrator.triage(case)
+    run.result.routing = run.routing
     asyncio.create_task(_run_pipeline(run))
-    logger.info("dispute %s accepted as %s (engine=%s)", case.dispute_id, run.run_id, run.engine)
+    logger.info(
+        "dispute %s accepted as %s (engine=%s, priority=%s, fast_tracked=%s)",
+        case.dispute_id,
+        run.run_id,
+        run.engine,
+        run.routing.priority.value,
+        run.routing.fast_tracked,
+    )
     return _accepted(run)
 
 
@@ -226,6 +247,73 @@ async def result(run_id: str) -> ResolutionResult:
     if run is None:
         raise HTTPException(status_code=404, detail=f"Unknown run '{run_id}'")
     return run.result
+
+
+# ---------------------------------------------------------------------------
+# Learning feedback loop
+# ---------------------------------------------------------------------------
+
+
+@app.post("/override/{run_id}", response_model=OverrideAccepted)
+async def override_run(run_id: str, payload: OverrideRequest) -> OverrideAccepted:
+    """Human reviewer overrides an escalated ruling.
+
+    The correction is captured and injected back into the Policy & Precedent
+    Agent's knowledge base as a new precedent, so the next analogous dispute is
+    arbitrated against what the reviewer actually decided. That closes the
+    loop from human judgement back into autonomous arbitration.
+    """
+    result = await orchestrator.apply_override(run_id, payload)
+    if result is None or result.override is None:
+        raise HTTPException(status_code=404, detail=f"Unknown run '{run_id}'")
+    logger.info(
+        "override on %s by %s -> %s (knowledge base now %d precedents)",
+        run_id,
+        payload.reviewer_id,
+        payload.decision.value,
+        result.override.knowledge_base_size,
+    )
+    return result.override
+
+
+@app.get("/precedents")
+async def precedents() -> dict:
+    """Current contents of the precedent knowledge base."""
+    store = orchestrator.policy_agent.store
+    return {
+        "count": store.size,
+        "precedents": [p.model_dump(mode="json") for p in store.all()],
+    }
+
+
+@app.get("/escalations")
+async def escalations() -> dict:
+    """Runs halted by the escalation protocol and awaiting human review."""
+    items = []
+    for run in broker.runs.values():
+        ruling = run.result.ruling
+        if ruling is None:
+            continue
+        # Keep overridden runs visible — they are the ones that fed the
+        # knowledge base, so hiding them would hide the learning loop.
+        if not ruling.escalated and run.result.override is None:
+            continue
+        items.append(
+            {
+                "run_id": run.run_id,
+                "dispute_id": run.case.dispute_id,
+                "priority": run.routing.priority.value if run.routing else "normal",
+                "queue": run.routing.queue if run.routing else None,
+                "sla_due_at": run.routing.sla_due_at.isoformat() if run.routing else None,
+                "overridden": run.result.override is not None,
+                "escalation": (
+                    run.result.escalation.model_dump(mode="json")
+                    if run.result.escalation
+                    else None
+                ),
+            }
+        )
+    return {"escalations": items, "count": len(items)}
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +359,21 @@ async def api_stream_latest() -> StreamingResponse:
 @app.get("/api/result/{run_id}", response_model=ResolutionResult)
 async def api_result(run_id: str) -> ResolutionResult:
     return await result(run_id)
+
+
+@app.post("/api/override/{run_id}", response_model=OverrideAccepted)
+async def api_override_run(run_id: str, payload: OverrideRequest) -> OverrideAccepted:
+    return await override_run(run_id, payload)
+
+
+@app.get("/api/precedents")
+async def api_precedents() -> dict:
+    return await precedents()
+
+
+@app.get("/api/escalations")
+async def api_escalations() -> dict:
+    return await escalations()
 
 
 # ---------------------------------------------------------------------------

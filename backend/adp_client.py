@@ -2,9 +2,11 @@
 
 Both providers satisfy the same interface, so the orchestrator is engine-agnostic:
 
-    async def run_vision(...)   -> VisionFinding
-    async def run_advocate(...) -> AdvocateArgument
-    async def run_judge(...)    -> Ruling
+    async def run_vision(...)    -> VisionFinding
+    async def run_advocate(...)  -> AdvocateArgument
+    async def run_fraud(...)     -> FraudAssessment
+    async def run_precedent(...) -> str          (consistency guidance for the Judge)
+    async def run_judge(...)     -> Ruling
 
 ``ADPClient`` talks to ADP over Server-Sent Events and parses the strict JSON
 contract declared in ``prompts.py``.
@@ -27,6 +29,7 @@ from typing import Any, Optional, Protocol, Sequence, runtime_checkable
 
 import httpx
 
+from agents import FraudDetectionAgent
 from config import Settings
 from models import (
     AdvocateArgument,
@@ -34,16 +37,24 @@ from models import (
     DisputeCase,
     EvidencePacket,
     Fact,
+    FraudAssessment,
+    PrecedentBundle,
+    RiskSignal,
     Ruling,
+    SLARoutingDecision,
     VisionFinding,
 )
 from prompts import (
     DRIVER_ADVOCATE_SYSTEM,
+    FRAUD_SYSTEM,
     IMAGE_ANALYSIS_SYSTEM,
     JUDGE_SYSTEM,
+    POLICY_PRECEDENT_SYSTEM,
     RIDER_ADVOCATE_SYSTEM,
     build_advocate_prompt,
+    build_fraud_prompt,
     build_judge_prompt,
+    build_precedent_prompt,
     build_vision_prompt,
 )
 
@@ -125,6 +136,10 @@ class LLMProvider(Protocol):
         party: str,
     ) -> AdvocateArgument: ...
 
+    async def run_fraud(self, case: DisputeCase, packet: EvidencePacket) -> FraudAssessment: ...
+
+    async def run_precedent(self, case: DisputeCase, bundle: PrecedentBundle) -> str: ...
+
     async def run_judge(
         self,
         case: DisputeCase,
@@ -132,6 +147,9 @@ class LLMProvider(Protocol):
         vision: Sequence[VisionFinding],
         rider_argument: AdvocateArgument,
         driver_argument: AdvocateArgument,
+        fraud: Optional[FraudAssessment] = None,
+        precedents: Optional[PrecedentBundle] = None,
+        routing: Optional[SLARoutingDecision] = None,
     ) -> Ruling: ...
 
 
@@ -313,6 +331,56 @@ class ADPClient:
             weaknesses=[str(w) for w in data.get("weaknesses", [])],
         )
 
+    async def run_fraud(self, case: DisputeCase, packet: EvidencePacket) -> FraudAssessment:
+        raw = await self.complete(
+            FRAUD_SYSTEM,
+            build_fraud_prompt(case, packet),
+            visitor_id=f"{case.dispute_id}-fraud",
+            agent="fraud",
+        )
+        data = parse_json_loose(raw)
+        verdict = str(data.get("verdict", "none"))
+        if verdict not in ("none", "low", "suspected", "likely", "confirmed"):
+            verdict = "none"
+        return FraudAssessment(
+            dispute_id=case.dispute_id,
+            risk_score=_clamp(float(data.get("risk_score", 0) or 0)),
+            verdict=verdict,  # type: ignore[arg-type]
+            rider_risk=_clamp(float(data.get("rider_risk", 0) or 0)),
+            driver_risk=_clamp(float(data.get("driver_risk", 0) or 0)),
+            signals=[
+                RiskSignal(
+                    party=s.get("party", "rider") if s.get("party") in ("rider", "driver") else "rider",
+                    signal=str(s.get("signal", "unspecified")),
+                    severity=s.get("severity", "low")
+                    if s.get("severity") in ("low", "medium", "high")
+                    else "low",
+                    detail=str(s.get("detail", "")),
+                )
+                for s in data.get("signals", [])
+                if isinstance(s, dict)
+            ],
+            recommended_action=str(data.get("recommended_action", "")),
+            policy_refs=[str(p) for p in data.get("policy_refs", [])],
+            reasoning=str(data.get("reasoning", "")),
+        )
+
+    async def run_precedent(self, case: DisputeCase, bundle: PrecedentBundle) -> str:
+        raw = await self.complete(
+            POLICY_PRECEDENT_SYSTEM,
+            build_precedent_prompt(case, bundle),
+            visitor_id=f"{case.dispute_id}-policy",
+            agent="policy",
+        )
+        data = parse_json_loose(raw)
+        guidance = str(data.get("guidance", "")).strip()
+        if guidance:
+            cited = data.get("cited_precedent_ids") or [
+                m.precedent.precedent_id for m in bundle.matches
+            ]
+            return f"{guidance} (cited: {', '.join(str(c) for c in cited)})"
+        return bundle.consistency_note
+
     async def run_judge(
         self,
         case: DisputeCase,
@@ -320,10 +388,15 @@ class ADPClient:
         vision: Sequence[VisionFinding],
         rider_argument: AdvocateArgument,
         driver_argument: AdvocateArgument,
+        fraud: Optional[FraudAssessment] = None,
+        precedents: Optional[PrecedentBundle] = None,
+        routing: Optional[SLARoutingDecision] = None,
     ) -> Ruling:
         raw = await self.complete(
             JUDGE_SYSTEM,
-            build_judge_prompt(case, packet, vision, rider_argument, driver_argument),
+            build_judge_prompt(
+                case, packet, vision, rider_argument, driver_argument, fraud, precedents, routing
+            ),
             visitor_id=f"{case.dispute_id}-judge",
             agent="judge",
         )
@@ -363,6 +436,62 @@ def _num(packet: EvidencePacket, key: str, default: float = 0.0) -> float:
     return float(fact.value)
 
 
+def _apply_context(
+    ruling: Ruling,
+    case: DisputeCase,
+    fraud: Optional[FraudAssessment],
+    precedents: Optional[PrecedentBundle],
+) -> Ruling:
+    """Let the fraud and precedent signals temper the Judge's confidence.
+
+    Deliberately conservative: this *never* flips the decision, it only adjusts
+    how much confidence the Judge is willing to claim. That keeps the
+    deterministic baseline stable while making the Phase 2 signals genuinely
+    load-bearing — a case that contradicts binding precedent, or that smells of
+    bad faith, loses confidence and can drop below the escalation threshold.
+    """
+    delta = 0.0
+    notes: list[str] = []
+
+    if fraud is not None:
+        penalty = {
+            "confirmed": 0.12,
+            "likely": 0.07,
+            "suspected": 0.03,
+        }.get(fraud.verdict, 0.0)
+        if penalty:
+            delta -= penalty
+            notes.append(
+                f"Bad-faith risk scored {fraud.risk_score:.2f} ({fraud.verdict}) — "
+                f"confidence reduced by {penalty:.2f}."
+            )
+        if fraud.policy_refs:
+            ruling.policy_applied = list(dict.fromkeys(ruling.policy_applied + fraud.policy_refs))
+
+    if precedents is not None and precedents.matches:
+        top = precedents.matches[0]
+        if top.similarity >= 0.50:
+            if top.precedent.ruling == ruling.decision.value:
+                delta += 0.03
+                notes.append(
+                    f"Ruling aligns with precedent {top.precedent.precedent_id} "
+                    f"(similarity {top.similarity:.2f})."
+                )
+            else:
+                delta -= 0.08
+                notes.append(
+                    f"Ruling diverges from precedent {top.precedent.precedent_id} "
+                    f"(similarity {top.similarity:.2f}), which resolved as "
+                    f"{top.precedent.ruling.replace('_', ' ')}."
+                )
+
+    if delta:
+        ruling.confidence = _clamp(ruling.confidence + delta, 0.05, 0.97)
+    if notes:
+        ruling.key_findings = ruling.key_findings + notes
+    return ruling
+
+
 class OfflineReasoner:
     """Evidence-driven reasoning with no network dependency.
 
@@ -374,6 +503,7 @@ class OfflineReasoner:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._fraud_agent = FraudDetectionAgent(settings)
 
     async def aclose(self) -> None:  # symmetry with ADPClient
         return None
@@ -525,6 +655,19 @@ class OfflineReasoner:
             weaknesses=weaknesses,
         )
 
+    async def run_fraud(self, case: DisputeCase, packet: EvidencePacket) -> FraudAssessment:
+        """Delegate to the deterministic scorer in ``agents.py``.
+
+        The fraud agent is rule-driven by design — an LLM is not needed to count
+        fraud flags, and a deterministic score is far easier to defend to a
+        reviewer than a model's hunch.
+        """
+        return await self._fraud_agent.assess(case, packet)
+
+    async def run_precedent(self, case: DisputeCase, bundle: PrecedentBundle) -> str:
+        """Retrieval is deterministic; just surface the consistency note."""
+        return bundle.consistency_note
+
     async def run_judge(
         self,
         case: DisputeCase,
@@ -532,15 +675,23 @@ class OfflineReasoner:
         vision: Sequence[VisionFinding],
         rider_argument: AdvocateArgument,
         driver_argument: AdvocateArgument,
+        fraud: Optional[FraudAssessment] = None,
+        precedents: Optional[PrecedentBundle] = None,
+        routing: Optional[SLARoutingDecision] = None,
     ) -> Ruling:
         dtype = case.dispute_type
         if dtype == "no_show_charge":
-            return _judge_no_show(case, packet)
-        if dtype == "route_deviation":
-            return _judge_route_deviation(case, packet)
-        if dtype == "property_damage":
-            return _judge_property_damage(case, packet, vision)
-        return _judge_generic(case, packet)
+            ruling = _judge_no_show(case, packet)
+        elif dtype == "route_deviation":
+            ruling = _judge_route_deviation(case, packet)
+        elif dtype == "property_damage":
+            ruling = _judge_property_damage(case, packet, vision)
+        elif dtype == "safety_incident":
+            ruling = _judge_safety_incident(case, packet)
+        else:
+            ruling = _judge_generic(case, packet)
+
+        return _apply_context(ruling, case, fraud, precedents)
 
     # --- rhetoric helpers ----------------------------------------------------
     def _headline(self, case: DisputeCase, party: str) -> str:
@@ -894,6 +1045,66 @@ def _judge_property_damage(
         driver_summary=driver_summary,
         escalated=escalated,
         escalation_reason=escalation_reason,
+    )
+
+
+def _judge_safety_incident(case: DisputeCase, packet: EvidencePacket) -> Ruling:
+    """Safety allegations are outside the system's autonomy boundary by design.
+
+    The judge still does useful work — corroborating the allegation against the
+    telematics so the human investigator opens with the facts — but it never
+    issues a monetary ruling on its own.
+    """
+    braking = sum(1 for e in case.app_events if e.event_type == "harsh_braking_detected")
+    speeding = sum(1 for e in case.app_events if e.event_type == "speed_limit_exceeded")
+    peak = max((p.speed_kmh for p in case.gps_telemetry), default=0.0)
+
+    findings = [
+        f"Telematics logged {braking} harsh-braking event(s)"
+        + (f" and {speeding} speed-limit breach(es)" if speeding else "")
+        + ".",
+        f"Peak recorded speed {peak:.0f} km/h." if peak else "No speed samples available.",
+        f"{len(case.chat_logs)} chat message(s) on record between the parties.",
+    ]
+
+    corroborated = braking > 0 or speeding > 0
+    confidence = 0.55 if corroborated else 0.45
+
+    return Ruling(
+        dispute_id=case.dispute_id,
+        decision=Decision.ESCALATE_TO_HUMAN,
+        amount=0.0,
+        confidence=confidence,
+        reasoning=(
+            "Safety allegations sit outside this system's autonomy boundary: the consequences "
+            "(driver suspension, liability, possible police referral) are not ones an automated "
+            "arbiter should decide. The telematics "
+            + (
+                "corroborate part of the rider's account — "
+                if corroborated
+                else "do not corroborate the rider's account — "
+            )
+            + f"{braking} harsh-braking event(s)"
+            + (f", {speeding} speed-limit breach(es)" if speeding else "")
+            + (f" and a peak of {peak:.0f} km/h" if peak else "")
+            + ". Establishing intent, driver fitness to remain on the platform and any liability "
+            "requires a human investigator, so no monetary ruling is issued and the case is "
+            "handed over in full under policy SAFETY-1."
+        ),
+        key_findings=findings,
+        policy_applied=["SAFETY-1"],
+        rider_summary=(
+            "Your safety report has been escalated to a human investigator and is being treated "
+            "with priority. No charge has been changed in the meantime."
+        ),
+        driver_summary=(
+            "A safety report has been filed against this trip and is under human investigation. "
+            "You will be contacted before any action is taken on your account."
+        ),
+        escalated=True,
+        # Left empty on purpose: the escalation protocol owns the wording for
+        # mandatory-review categories, so the reason is not stated twice.
+        escalation_reason=None,
     )
 
 

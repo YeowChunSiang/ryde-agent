@@ -3,12 +3,16 @@
 The pipeline is deliberately *not* an autonomous agent graph — it is an explicit
 state machine, which is what a legal-style arbitration process actually needs:
 
-    1. INTAKE      validate the dossier against Pydantic models
-    2. EVIDENCE    compute auditable facts in pure Python (no LLM)
-    3. VISION      (conditional) forensic screen of submitted media
-    4. ADVOCACY    Rider + Driver advocates run concurrently via asyncio.gather
-    5. ARBITRATION Judge weighs both cases against policy
-    6. ESCALATION  confidence gate -> human-in-the-loop
+    1. TRIAGE       SLA & Routing Manager tags and fast-tracks the ticket
+    2. COLLECTION   Evidence Collection Agent fans out over upstream services
+                    (runs concurrently with the fraud and precedent agents)
+    3. EVIDENCE     compute auditable facts in pure Python (no LLM)
+    4. RISK         Fraud & Bad-Faith Agent scores both parties
+    5. PRECEDENT    Policy & Precedent Agent retrieves analogous past rulings
+    6. VISION       (conditional) forensic screen of submitted media
+    7. ADVOCACY     Rider + Driver advocates run concurrently via asyncio.gather
+    8. ARBITRATION  Judge weighs both cases against policy, risk and precedent
+    9. ESCALATION   confidence gate -> human-in-the-loop hand-off packet
 
 Every state transition is emitted as an ``AgentEvent`` so the frontend can stream
 the agents "thinking" in real time over SSE — the observability requirement from
@@ -30,6 +34,13 @@ from adp_client import (
     OfflineReasoner,
     build_provider,
 )
+from agents import (
+    EvidenceCollectionAgent,
+    FraudDetectionAgent,
+    PolicyPrecedentAgent,
+    SLARoutingManager,
+    build_escalation_packet,
+)
 from config import Settings
 from evidence import extract_evidence
 from models import (
@@ -41,8 +52,13 @@ from models import (
     DisputeStatus,
     EventLevel,
     EvidencePacket,
+    FraudAssessment,
+    OverrideRequest,
+    PrecedentBundle,
     ResolutionResult,
+    RoutingStatus,
     Ruling,
+    SLARoutingDecision,
     VisionFinding,
 )
 
@@ -58,6 +74,9 @@ class Run:
         self.run_id = run_id
         self.case = case
         self.engine = engine
+        #: Triage verdict, assigned before the run is queued so a fast-tracked
+        #: ticket never sits behind standard ones.
+        self.routing: Optional[SLARoutingDecision] = None
         self.events: list[AgentEvent] = []
         self.result = ResolutionResult(
             run_id=run_id,
@@ -130,9 +149,91 @@ class Orchestrator:
             OfflineReasoner(settings) if self.provider.engine == "adp" else None
         )
 
+        # --- Phase 2 agents -------------------------------------------------
+        self.sla = SLARoutingManager(settings)
+        self.collector = EvidenceCollectionAgent(settings)
+        self.fraud_agent = FraudDetectionAgent(settings)
+        self.policy_agent = PolicyPrecedentAgent(settings)
+
     @property
     def engine(self) -> str:
         return self.provider.engine
+
+    @property
+    def knowledge_base_size(self) -> int:
+        return self.policy_agent.store.size
+
+    def triage(self, case: DisputeCase) -> SLARoutingDecision:
+        """Assign an SLA band at the API boundary, before the run is queued."""
+        return self.sla.route(case)
+
+    async def apply_override(
+        self, run_id: str, request: OverrideRequest
+    ) -> Optional[ResolutionResult]:
+        """Absorb a human correction into the precedent knowledge base.
+
+        This is the learning feedback loop: the reviewer's decision becomes a
+        new precedent, so the next similar dispute is judged against it.
+        """
+        run = self.broker.get(run_id)
+        if run is None:
+            return None
+
+        previous = run.result.ruling.decision.value if run.result.ruling else None
+        precedent = self.policy_agent.learn_from_override(
+            run.case,
+            run.result.evidence,
+            run.result.ruling,
+            request,
+            run_id,
+        )
+
+        from models import OverrideAccepted  # local import: avoids a cycle at import time
+
+        run.result.override = OverrideAccepted(
+            run_id=run_id,
+            dispute_id=run.case.dispute_id,
+            previous_decision=previous,
+            new_decision=request.decision,
+            new_amount=request.amount,
+            precedent_id=precedent.precedent_id if precedent else None,
+            knowledge_base_size=self.knowledge_base_size,
+            message=(
+                f"Override recorded. Added precedent "
+                f"{precedent.precedent_id if precedent else '(none)'} to the knowledge base "
+                f"({self.knowledge_base_size} precedents now)."
+                if precedent
+                else "Override recorded without adding a precedent."
+            ),
+        )
+
+        if run.result.ruling is not None:
+            run.result.ruling.decision = request.decision
+            run.result.ruling.amount = request.amount
+            run.result.ruling.escalated = False
+            run.result.ruling.escalation_reason = None
+            run.result.ruling.reasoning = (
+                f"{run.result.ruling.reasoning}\n\n"
+                f"HUMAN OVERRIDE by {request.reviewer_id}: {request.rationale.strip()}"
+            ).strip()
+        run.case.routing_status = RoutingStatus.OVERRIDDEN
+        run.result.status = DisputeStatus.RESOLVED
+
+        await run.emit(
+            AgentRole.LEARNING,
+            "override_applied",
+            f"Learning loop: reviewer {request.reviewer_id} overrode this ruling to "
+            f"{request.decision.value.replace('_', ' ')}"
+            + (f" (S${request.amount:.2f})" if request.amount else "")
+            + (
+                f". Knowledge base now holds {self.knowledge_base_size} precedents."
+                if precedent
+                else "."
+            ),
+            level=EventLevel.RULING,
+            payload=run.result.override.model_dump(mode="json"),
+        )
+        return run.result
 
     async def _pace(self) -> None:
         """Throttle offline runs so the SSE stream is watchable in a live demo.
@@ -206,7 +307,40 @@ class Orchestrator:
             },
         )
 
-        # --- 2. EVIDENCE ---------------------------------------------------
+        # --- 2. SLA & ROUTING ------------------------------------------------
+        routing = run.routing or self.sla.route(case)
+        run.routing = routing
+        run.result.routing = routing
+        run.case.routing_status = RoutingStatus.IN_ARBITRATION
+        await run.emit(
+            AgentRole.SLA_ROUTER,
+            "sla_routing",
+            f"SLA & Routing Manager — priority {routing.priority.value.upper()}"
+            + (" [FAST-TRACKED]" if routing.fast_tracked else "")
+            + f" → queue '{routing.queue}' position {routing.queue_position}, "
+            f"resolve within {routing.sla_target_minutes:.0f} min.",
+            level=EventLevel.WARNING if routing.fast_tracked else EventLevel.INFO,
+            payload=routing.model_dump(mode="json"),
+        )
+        for reason in routing.reasons:
+            await run.emit(AgentRole.SLA_ROUTER, "sla_reason", reason)
+        await self._pace()
+
+        # --- 3. PARALLEL: collection | evidence | fraud | precedent ----------
+        await run.emit(
+            AgentRole.ORCHESTRATOR,
+            "parallel_dispatch",
+            "Dispatching the Evidence Collection, Fraud & Bad-Faith and Policy & Precedent "
+            "agents concurrently — upstream retrieval overlaps with risk scoring and "
+            "precedent retrieval instead of queueing behind it.",
+        )
+        t_parallel = time.perf_counter()
+
+        # Start the collector first: it awaits simulated upstream latency, and
+        # every other agent gets to run during those awaits.
+        collection_task = asyncio.create_task(self.collector.collect(case))
+
+        # --- 3a. EVIDENCE EXTRACTION (pure Python, no LLM) -------------------
         t_stage = time.perf_counter()
         packet = extract_evidence(case)
         run.result.evidence = packet
@@ -254,9 +388,44 @@ class Orchestrator:
                 level=EventLevel.WARNING if signal.severity != "low" else EventLevel.INFO,
                 payload={"party": signal.party, "severity": signal.severity},
             )
+
+        # --- 3b/3c. FRAUD + PRECEDENT (concurrent with the collector) --------
+        fraud_task = asyncio.create_task(self._fraud(run, case, packet))
+        precedent_task = asyncio.create_task(self._precedent(run, case, packet))
+
+        manifest = await collection_task
+        run.result.collection = manifest
+        await run.emit(
+            AgentRole.EVIDENCE_COLLECTION,
+            "collection_complete",
+            manifest.summary,
+            level=EventLevel.WARNING if manifest.degraded else EventLevel.INFO,
+            duration_ms=manifest.total_latency_ms,
+            payload=manifest.model_dump(mode="json"),
+        )
+        for record in manifest.sources:
+            await run.emit(
+                AgentRole.EVIDENCE_COLLECTION,
+                "collection_source",
+                f"{record.source} {record.endpoint} → {record.records} record(s) "
+                f"in {record.latency_ms} ms [{record.status}]"
+                + (f" — {record.note}" if record.note else ""),
+                level=EventLevel.WARNING if record.status != "ok" else EventLevel.INFO,
+                payload=record.model_dump(mode="json"),
+            )
+
+        fraud = await fraud_task
+        precedents = await precedent_task
+        await run.emit(
+            AgentRole.ORCHESTRATOR,
+            "parallel_complete",
+            f"Collection, fraud and precedent agents all returned in "
+            f"{int((time.perf_counter() - t_parallel) * 1000)} ms of combined wall-clock "
+            f"(fanned out, not serialised).",
+        )
         await self._pace()
 
-        # --- 3. VISION (conditional) ----------------------------------------
+        # --- 6. VISION (conditional) ----------------------------------------
         vision: list[VisionFinding] = []
         if case.media_attachments:
             await run.emit(
@@ -348,7 +517,16 @@ class Orchestrator:
         t_judge = time.perf_counter()
         ruling = await self._guarded(
             run,
-            lambda p: p.run_judge(case, packet, vision, rider_argument, driver_argument),
+            lambda p: p.run_judge(
+                case,
+                packet,
+                vision,
+                rider_argument,
+                driver_argument,
+                run.result.fraud,
+                run.result.precedents,
+                routing,
+            ),
             label="Judge Agent",
         )
         run.result.ruling = ruling
@@ -385,6 +563,92 @@ class Orchestrator:
         )
 
     # ------------------------------------------------------------------
+    # Parallel risk & precedent agents (Phase 2)
+    # ------------------------------------------------------------------
+
+    async def _fraud(
+        self, run: Run, case: DisputeCase, packet: EvidencePacket
+    ) -> FraudAssessment:
+        t = time.perf_counter()
+        await run.emit(
+            AgentRole.FRAUD,
+            "fraud_scan",
+            "Fraud & Bad-Faith Agent is scoring dispute history, account age and whether the "
+            "filed claim contradicts the telemetry...",
+        )
+        await self._pace()
+        assessment = await self._guarded(
+            run,
+            lambda p: p.run_fraud(case, packet),
+            label="Fraud & Bad-Faith Agent",
+        )
+        run.result.fraud = assessment
+        await run.emit(
+            AgentRole.FRAUD,
+            "fraud_verdict",
+            f"Bad-faith risk {assessment.risk_score:.2f} ({assessment.verdict}) — "
+            f"rider {assessment.rider_risk:.2f} / driver {assessment.driver_risk:.2f}. "
+            f"{assessment.recommended_action}",
+            level=(
+                EventLevel.WARNING
+                if assessment.verdict in ("likely", "confirmed")
+                else EventLevel.INFO
+            ),
+            duration_ms=int((time.perf_counter() - t) * 1000),
+            payload=assessment.model_dump(mode="json"),
+        )
+        for signal in assessment.signals:
+            await run.emit(
+                AgentRole.FRAUD,
+                "fraud_signal",
+                f"Risk ({signal.party}/{signal.severity}) {signal.signal} — {signal.detail}",
+                level=EventLevel.WARNING if signal.severity != "low" else EventLevel.INFO,
+                payload={"party": signal.party, "severity": signal.severity},
+            )
+        return assessment
+
+    async def _precedent(
+        self, run: Run, case: DisputeCase, packet: EvidencePacket
+    ) -> PrecedentBundle:
+        t = time.perf_counter()
+        await run.emit(
+            AgentRole.POLICY,
+            "precedent_retrieval",
+            "Policy & Precedent Agent is searching the knowledge base for analogous past rulings...",
+        )
+        await self._pace()
+        bundle = await self.policy_agent.retrieve(case, packet)
+        if self.provider.engine == "adp":
+            # Ask the model to translate the retrieved precedents into guidance;
+            # on failure _guarded degrades to the stored consistency note.
+            guidance = await self._guarded(
+                run,
+                lambda p: p.run_precedent(case, bundle),
+                label="Policy & Precedent Agent",
+            )
+            if guidance:
+                bundle.consistency_note = guidance
+        run.result.precedents = bundle
+        await run.emit(
+            AgentRole.POLICY,
+            "precedent_result",
+            f"Retrieved {bundle.retrieved_count} analogous precedent(s) — {bundle.consistency_note}",
+            duration_ms=int((time.perf_counter() - t) * 1000),
+            payload=bundle.model_dump(mode="json"),
+        )
+        for match in bundle.matches:
+            await run.emit(
+                AgentRole.POLICY,
+                "precedent_match",
+                f"[{match.precedent.precedent_id}] similarity {match.similarity:.2f} — "
+                f"{match.precedent.title}; resolved as "
+                f"{match.precedent.ruling.replace('_', ' ')}"
+                + (f" (S${match.precedent.amount:.2f})" if match.precedent.amount else ""),
+                payload=match.model_dump(mode="json"),
+            )
+        return bundle
+
+    # ------------------------------------------------------------------
     # Escalation gate (stretch goal: human-in-the-loop)
     # ------------------------------------------------------------------
 
@@ -393,18 +657,24 @@ class Orchestrator:
         if ruling.escalation_reason:
             reasons.append(ruling.escalation_reason)
 
-        if run.case.dispute_type.value in self.settings.auto_escalate_dispute_types:
+        mandatory = run.case.dispute_type.value in self.settings.auto_escalate_dispute_types
+        if mandatory:
+            # The category rule is the authoritative reason, so skip the
+            # judge-level "declined to rule" phrasing — saying both is noise.
             reasons.append(
                 f"{run.case.dispute_type.value.replace('_', ' ')} disputes always require human review."
             )
+        elif ruling.decision == Decision.ESCALATE_TO_HUMAN and not ruling.escalation_reason:
+            reasons.append("The Judge declined to issue an autonomous ruling for this category.")
 
         if ruling.confidence < self.settings.confidence_escalation_threshold:
             reasons.append(
                 f"Confidence {ruling.confidence:.0%} is below the "
                 f"{self.settings.confidence_escalation_threshold:.0%} autonomy threshold."
             )
-            ruling.decision = Decision.ESCALATE_TO_HUMAN
-            ruling.amount = 0.0
+            if ruling.decision != Decision.ESCALATE_TO_HUMAN:
+                ruling.decision = Decision.ESCALATE_TO_HUMAN
+                ruling.amount = 0.0
 
         if not reasons:
             await run.emit(
@@ -417,13 +687,40 @@ class Orchestrator:
 
         ruling.escalated = True
         ruling.escalation_reason = " ".join(reasons)
+        run.case.routing_status = RoutingStatus.ESCALATED_TO_HUMAN
+
+        # Post-judge escalation protocol: autonomous arbitration halts here and
+        # hands the reviewer a complete packet instead of a bare flag.
+        packet = build_escalation_packet(
+            run.run_id,
+            run.case,
+            run.routing,
+            run.result.evidence,
+            run.result.fraud,
+            run.result.precedents,
+            ruling,
+            ruling.escalation_reason,
+            confidence_threshold=self.settings.confidence_escalation_threshold,
+        )
+        run.result.escalation = packet
+
         await run.emit(
             AgentRole.ESCALATION,
             "escalation_triggered",
-            f"Escalated to a human reviewer — {ruling.escalation_reason}",
+            f"Autonomous arbitration HALTED — escalated to a human reviewer. {ruling.escalation_reason}",
             level=EventLevel.WARNING,
-            payload={"reason": ruling.escalation_reason},
+            payload=packet.model_dump(mode="json"),
         )
+        await run.emit(
+            AgentRole.ESCALATION,
+            "escalation_summary",
+            packet.case_summary,
+            level=EventLevel.WARNING,
+        )
+        for focus in packet.recommended_focus:
+            await run.emit(AgentRole.ESCALATION, "escalation_focus", focus)
+        for flag in packet.risk_flags[:4]:
+            await run.emit(AgentRole.ESCALATION, "escalation_risk", flag, level=EventLevel.WARNING)
 
     # ------------------------------------------------------------------
     # Resilience: ADP failure -> deterministic reasoner

@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import Literal
+from pathlib import Path
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -43,7 +44,7 @@ class Settings(BaseModel):
         description="auto = use ADP when a key exists, else offline reasoner",
     )
     confidence_escalation_threshold: float = Field(
-        default=0.65,
+        default=0.70,
         description="Rulings below this confidence are escalated to a human reviewer",
     )
     offline_demo_pacing_ms: float = Field(
@@ -58,6 +59,28 @@ class Settings(BaseModel):
     auto_escalate_dispute_types: tuple[str, ...] = Field(
         default=("safety_incident",),
         description="Dispute categories that always require a human reviewer",
+    )
+
+    # --- SLA & Routing Manager ---------------------------------------------
+    sla_high_value_threshold: float = Field(
+        default=50.0,
+        description="Claimed amount (SGD) above which a ticket is promoted to HIGH priority",
+    )
+
+    # --- Evidence Collection Agent ------------------------------------------
+    collection_simulate_latency: bool = Field(
+        default=True, description="Sleep to emulate upstream API round-trips"
+    )
+    collection_base_latency_ms: int = Field(default=40)
+    collection_jitter_ms: int = Field(default=90)
+
+    # --- Policy & Precedent Agent (mock RAG) ---------------------------------
+    precedent_top_k: int = Field(
+        default=2, description="Number of analogous precedents retrieved per dispute"
+    )
+    precedent_store_path: Optional[Path] = Field(
+        default=None,
+        description="JSON file backing the precedent knowledge base (survives restarts)",
     )
 
     # --- Service -----------------------------------------------------------
@@ -91,11 +114,26 @@ def get_settings() -> Settings:
         adp_max_retries=int(os.getenv("ADP_MAX_RETRIES", "1")),
         engine_mode=os.getenv("ENGINE_MODE", "auto"),  # type: ignore[arg-type]
         confidence_escalation_threshold=float(
-            os.getenv("CONFIDENCE_ESCALATION_THRESHOLD", "0.65")
+            os.getenv("CONFIDENCE_ESCALATION_THRESHOLD", "0.70")
         ),
         offline_demo_pacing_ms=float(os.getenv("OFFLINE_DEMO_PACING_MS", "220")),
         auto_escalate_dispute_types=_env_tuple(
             "AUTO_ESCALATE_DISPUTE_TYPES", ("safety_incident",)
+        ),
+        sla_high_value_threshold=float(os.getenv("SLA_HIGH_VALUE_THRESHOLD", "50")),
+        collection_simulate_latency=os.getenv("COLLECTION_SIMULATE_LATENCY", "1") not in (
+            "0",
+            "false",
+            "False",
+        ),
+        collection_base_latency_ms=int(os.getenv("COLLECTION_BASE_LATENCY_MS", "40")),
+        collection_jitter_ms=int(os.getenv("COLLECTION_JITTER_MS", "90")),
+        precedent_top_k=int(os.getenv("PRECEDENT_TOP_K", "2")),
+        precedent_store_path=Path(
+            os.getenv(
+                "PRECEDENT_STORE_PATH",
+                str(Path(__file__).resolve().parent / "data" / "precedents.json"),
+            )
         ),
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "3000")),

@@ -2,6 +2,9 @@ import type {
   CaseSummary,
   DisputeAccepted,
   Health,
+  OverrideAccepted,
+  OverrideRequest,
+  PrecedentLibrary,
   ResolutionResult,
 } from "@/types";
 
@@ -11,6 +14,19 @@ async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) {
     throw new Error(`${res.status} ${res.statusText} — ${path}`);
+  }
+  return (await res.json()) as T;
+}
+
+async function postJSON<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`POST ${path} failed: ${res.status} ${res.statusText} ${detail}`);
   }
   return (await res.json()) as T;
 }
@@ -42,6 +58,18 @@ export async function startDispute(caseId: string): Promise<DisputeAccepted> {
 
 export async function fetchResult(runId: string): Promise<ResolutionResult> {
   return getJSON<ResolutionResult>(`/result/${runId}`);
+}
+
+/** Human reviewer correction — feeds the precedent knowledge base (learning loop). */
+export async function submitOverride(
+  runId: string,
+  payload: OverrideRequest,
+): Promise<OverrideAccepted> {
+  return postJSON<OverrideAccepted>(`/override/${runId}`, payload);
+}
+
+export async function fetchPrecedents(): Promise<PrecedentLibrary> {
+  return getJSON<PrecedentLibrary>("/precedents");
 }
 
 /**
