@@ -257,21 +257,27 @@ class TRTCASRClient:
 class SimulatedASRClient:
     """Deterministic transcription used when TRTC credentials are absent.
 
-    The transcript is derived from the attachment itself:
+    The transcript is derived from the attachment itself, in priority order:
 
-    * ``attachment.caption`` / ``transcript_hint`` — the mock payload shipped
-      with the sample dossiers carries the scripted dialogue, so the
-      transcription step is reproducible and the downstream agents still
-      receive realistic text to score.
-    * otherwise a neutral placeholder is produced, which keeps the pipeline
-      shape intact for ad-hoc uploads.
+    * ``attachment.transcript_hint`` — the mock payload shipped with the
+      sample dossiers carries the scripted dialogue, so the transcription
+      step is reproducible and the downstream agents still receive realistic
+      text to score.
+    * a **sidecar script** (``<name>.txt`` next to the recording, or in the
+      packaged ``data/uploads/samples/`` script library) — this is how a real
+      audio file "contains" aggressive language for the offline demo: the
+      mock safety recording ships with its dialogue as a sidecar.
+    * ``attachment.caption`` as a last resort.
+
+    Ad-hoc uploads with none of the above produce a neutral placeholder,
+    which keeps the pipeline shape intact.
     """
 
     def __init__(self, settings: Optional[Settings] = None) -> None:
         self.settings = settings
 
     async def transcribe(self, attachment: MediaAttachment) -> AudioTranscript:
-        hint = _hint_of(attachment)
+        hint = _hint_of(attachment, self.settings)
         segments = _segmentise(hint, attachment.duration_s)
         full_text = " ".join(s.text for s in segments).strip()
         score, threat, keywords = _score_text(full_text)
@@ -293,19 +299,81 @@ class SimulatedASRClient:
         return None
 
 
-def _hint_of(attachment: MediaAttachment) -> str:
+def _hint_of(attachment: MediaAttachment, settings: Optional[Settings] = None) -> str:
     """Pull the scripted dialogue off an attachment (see ``cases.py``).
 
     Sample dossiers ship a ``transcript_hint`` string with the mock recording so
-    the transcription step is reproducible; ad-hoc uploads simply have none.
+    the transcription step is reproducible. An uploaded audio file instead
+    carries its dialogue in a sidecar ``.txt`` so that a real payload can be
+    transcribed offline without TRTC credentials.
     """
     extras = getattr(attachment, "model_extra", None) or {}
     value = extras.get("transcript_hint")
     if value:
         return str(value)
+
+    sidecar = _sidecar_script(attachment, settings)
+    if sidecar:
+        return sidecar
+
     # Fall back to the caption so an uploaded file without a hint is still
     # transcribed into something the downstream agents can score.
     return str(attachment.caption or "")
+
+
+def _sidecar_script(
+    attachment: MediaAttachment, settings: Optional[Settings] = None
+) -> str:
+    """Read ``<recording>.txt`` sitting beside the audio (or in `samples/`).
+
+    This is the offline stand-in for "the audio file contains aggressive
+    language": speech recognition cannot run without credentials, so the mock
+    recording ships its dialogue next to the waveform. The moment real TRTC
+    credentials are configured, ``TRTCASRClient`` ignores this entirely.
+    """
+    local = getattr(attachment, "local_path", None)
+    if not local:
+        return ""
+    raw = Path(str(local))
+    stem = raw.stem
+    if not stem:
+        return ""
+
+    # Uploads get de-duplicated to "<name>-1.wav"; the sidecar is still
+    # "<name>.txt", so try both the literal stem and the de-duplicated one.
+    stems = [stem, re.sub(r"-\d+$", "", stem)]
+    search: list[Path] = [raw.with_suffix(".txt")]
+    if settings is not None:
+        media_root = Path(str(settings.media_dir)).expanduser()
+        backend_root = Path(__file__).resolve().parent
+        for base in (media_root, backend_root / media_root, backend_root):
+            for s in stems:
+                search.extend(
+                    [base / raw.parent / f"{s}.txt", base / "samples" / f"{s}.txt"]
+                )
+    else:  # pragma: no cover - defensive
+        for s in stems:
+            search.append(
+                Path(__file__).resolve().parent / "data" / "uploads" / "samples" / f"{s}.txt"
+            )
+
+    seen: set[Path] = set()
+    for candidate in search:
+        try:
+            resolved = candidate.resolve()
+        except OSError:  # pragma: no cover - defensive
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            if resolved.is_file():
+                text = resolved.read_text(encoding="utf-8", errors="replace").strip()
+                if text:
+                    return text
+        except OSError:  # pragma: no cover - defensive
+            continue
+    return ""
 
 
 def _segmentise(hint: str, duration_s: Optional[float]) -> list[AudioSegment]:

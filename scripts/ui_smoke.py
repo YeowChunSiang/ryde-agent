@@ -139,6 +139,24 @@ def main() -> int:
         )
         print(f"  <audio> element: {audio}")
 
+        # Avatars stream in as agents fire, and are lazy-loaded (correct for a
+        # long feed). Force every one eager so the check proves each URL
+        # actually decodes, rather than skipping off-screen ones.
+        page.evaluate(
+            """() => {
+                document.querySelectorAll('img[loading="lazy"]')
+                    .forEach(i => { i.loading = 'eager'; });
+            }"""
+        )
+        page.wait_for_function(
+            """() => {
+                const imgs = [...document.querySelectorAll('img')]
+                    .filter(i => (i.getAttribute('src') || '').includes('/assets/miora/agents/'));
+                return imgs.length > 0 && imgs.every(i => i.complete);
+            }""",
+            timeout=30_000,
+        )
+
         avatars = page.evaluate(
             """() => {
                 const imgs = [...document.querySelectorAll('img')]

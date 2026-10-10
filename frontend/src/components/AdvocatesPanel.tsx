@@ -88,9 +88,9 @@ function ArgumentCard({
         {argument.policy_refs.length > 0 && (
           <Field label="Policy clauses">
             <span className="flex flex-wrap gap-1">
-              {argument.policy_refs.map((ref) => (
+              {argument.policy_refs.map((ref, index) => (
                 <code
-                  key={ref}
+                  key={`${ref}-${index}`}
                   className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
                 >
                   {ref}

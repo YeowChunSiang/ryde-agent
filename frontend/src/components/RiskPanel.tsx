@@ -179,9 +179,9 @@ export function RiskPanel({ routing, collection, fraud, precedents, library }: P
             </p>
             {fraud.policy_refs.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
-                {fraud.policy_refs.map((ref) => (
+                {fraud.policy_refs.map((ref, index) => (
                   <code
-                    key={ref}
+                    key={`${ref}-${index}`}
                     className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
                   >
                     {ref}

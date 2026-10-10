@@ -123,9 +123,9 @@ export function EvidencePanel({ evidence, vision, caseId, disabled, assets }: Pr
         <section>
           <SectionTitle>Policy Compliance</SectionTitle>
           <ul className="mt-2 space-y-1.5">
-            {evidence.policy_checks.map((check) => (
+            {evidence.policy_checks.map((check, index) => (
               <li
-                key={check.ref}
+                key={`${check.ref}-${index}`}
                 className={cn(
                   "flex items-start gap-2 rounded-md border px-3 py-2",
                   check.compliant

@@ -1025,8 +1025,29 @@ def extract_evidence(case: DisputeCase) -> EvidencePacket:
     _analyse_audio_evidence(case, packet)
     _analyse_video_evidence(case, packet)
     _analyse_risk(case, packet)
+    _dedupe_policy_checks(packet)
     packet.summary = _summarise(case, packet)
     return packet
+
+
+def _dedupe_policy_checks(packet: EvidencePacket) -> None:
+    """Collapse repeated clause references into one entry.
+
+    A dossier can carry several recordings of the same incident (a rider and a
+    driver both upload audio), which would otherwise emit the same clause once
+    per attachment. One clause = one row, and the least compliant outcome wins
+    so a single breach can never be diluted by a passing duplicate.
+    """
+    seen: dict[str, PolicyCheck] = {}
+    for check in packet.policy_checks:
+        prior = seen.get(check.ref)
+        if prior is None:
+            seen[check.ref] = check
+            continue
+        if not check.compliant and prior.compliant:
+            seen[check.ref] = check
+    if len(seen) != len(packet.policy_checks):
+        packet.policy_checks[:] = list(seen.values())
 
 
 def _summarise(case: DisputeCase, packet: EvidencePacket) -> str:

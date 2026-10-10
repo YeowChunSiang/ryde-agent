@@ -24,6 +24,7 @@ sys.path.insert(0, str(BACKEND))
 from fastapi.testclient import TestClient  # noqa: E402
 
 import cases as cases_mod  # noqa: E402
+import evidence as evidence_mod  # noqa: E402
 import main as main_mod  # noqa: E402
 import trtc_client as asr  # noqa: E402
 import vision_utils as vu  # noqa: E402
@@ -225,6 +226,57 @@ def test_upload_audio_without_a_hint_still_transcribes(client, sample_audio):
     assert transcript["threat_detected"] is False
 
 
+def test_upload_audio_reads_the_sidecar_script(client, sample_audio):
+    """prompt3: "a mock audio file containing aggressive language" is transcribed.
+
+    The clip ships its dialogue as ``<name>.txt`` so the offline ASR hears the
+    argument without TRTC credentials — no form-field hint required.
+    """
+    with sample_audio.open("rb") as fh:
+        res = client.post(
+            "/upload-audio",
+            files={"file": (sample_audio.name, fh, "audio/wav")},
+            data={"case_id": "DISP-006", "captured_at": "2026-09-18T23:41:00+08:00"},
+        )
+    assert res.status_code == 200, res.text
+    transcript = res.json()["transcript"]
+    assert transcript["engine"] == "simulated"
+    assert transcript["threat_detected"] is True
+    assert transcript["hostility_score"] >= 0.8
+    assert "i know where you live" in transcript["full_text"].lower()
+
+
+def test_sidecar_script_is_found_next_to_or_below_the_recording(settings, tmp_path):
+    """The sidecar lookup survives upload de-duplication (`name-1.wav`)."""
+    clip = tmp_path / "argument.wav"
+    clip.write_bytes(b"RIFF")
+    (tmp_path / "argument.txt").write_text("driver: I will find you!", encoding="utf-8")
+
+    attachment = MediaAttachment(
+        attachment_id="att-1",
+        media_type="audio",
+        url=str(clip),
+        local_path=str(clip),
+    )
+    assert "I will find you" in asr._sidecar_script(attachment, settings)
+
+    deduped = MediaAttachment(
+        attachment_id="att-2",
+        media_type="audio",
+        url=str(tmp_path / "argument-3.wav"),
+        local_path=str(tmp_path / "argument-3.wav"),
+    )
+    assert "I will find you" in asr._sidecar_script(deduped, settings)
+
+    orphan = MediaAttachment(
+        attachment_id="att-3",
+        media_type="audio",
+        url=str(tmp_path / "other.wav"),
+        local_path=str(tmp_path / "other.wav"),
+    )
+    assert asr._sidecar_script(orphan, settings) == ""
+
+
 def test_upload_video_extracts_keyframes(client, sample_video):
     with sample_video.open("rb") as fh:
         res = client.post(
@@ -270,6 +322,29 @@ def _resolve(client, case_id: str) -> dict:
     res = client.post("/resolve", json={"case_id": case_id})
     assert res.status_code == 200, res.text
     return res.json()
+
+
+def test_repeated_recordings_produce_one_policy_check_each():
+    """Two recordings of the same incident must not emit duplicate clauses.
+
+    A rider and a driver can both upload audio; the clause list is a
+    compliance matrix, not a per-attachment log, and duplicate `ref`s also
+    break React's reconciliation keys downstream.
+    """
+    case = _case("DISP-006")
+    scripted = _attachment("DISP-006", "audio")
+    # Transcripts are grafted on at run time by the orchestrator, so do it here.
+    transcript = asyncio.run(asr.SimulatedASRClient(get_settings()).transcribe(scripted))
+    clone = scripted.model_copy(
+        update={"attachment_id": "media-disp006-audio-2", "transcript": transcript}
+    )
+    scripted.transcript = transcript
+    case.media_attachments = [scripted, clone]
+
+    packet = evidence_mod.extract_evidence(case)
+    refs = [c.ref for c in packet.policy_checks]
+    assert len(refs) == len(set(refs)), f"duplicate clause refs: {refs}"
+    assert "SAFETY-2" in refs
 
 
 def test_audio_pipeline_escalates_the_safety_case(client):

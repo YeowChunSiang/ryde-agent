@@ -293,6 +293,18 @@ def write_argument_wav(path: Path, seconds: float = 42.0, rate: int = 16000) -> 
             data += struct.pack("<h", max(-32768, min(32767, sample)))
         out.writeframes(bytes(data))
 
+    # Sidecar dialogue script. Speech recognition cannot run offline, so the
+    # mock recording carries its own transcript next to the waveform; the
+    # simulated ASR provider reads it and the downstream agents score it.
+    path.with_suffix(".txt").write_text(
+        "driver: You stupid passenger, shut up and sit there!\n"
+        "rider: Please slow down, you are scaring me.\n"
+        "driver: I will find you after this trip, I know where you live!\n"
+        "rider: I am recording this, stop the car.\n"
+        "driver: Say one more word and I will break your phone.\n",
+        encoding="utf-8",
+    )
+
 
 def write_cabin_mp4(path: Path, seconds: int = 6) -> None:
     """6-second cabin-camera style clip (synthetic, has motion + a counter).

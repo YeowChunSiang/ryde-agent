@@ -104,9 +104,9 @@ export function VerdictPanel({ result, threshold = 0.7 }: Props) {
             Policy Applied
           </h3>
           <div className="mt-2 flex flex-wrap gap-1">
-            {ruling.policy_applied.map((ref) => (
+            {ruling.policy_applied.map((ref, index) => (
               <code
-                key={ref}
+                key={`${ref}-${index}`}
                 className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
               >
                 {ref}
