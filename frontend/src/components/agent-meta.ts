@@ -14,7 +14,11 @@ export interface AgentMeta {
   bg: string;
   border: string;
   dot: string;
+  /** Phase 3: Miora-generated avatar under `/assets/miora/agents`. */
+  avatar: string;
 }
+
+const AVATAR = (role: string) => `/assets/miora/agents/${role}.png`;
 
 export const AGENT_META: Record<AgentRole, AgentMeta> = {
   orchestrator: {
@@ -24,6 +28,16 @@ export const AGENT_META: Record<AgentRole, AgentMeta> = {
     bg: "bg-zinc-500/10",
     border: "border-zinc-500/30",
     dot: "bg-zinc-400",
+    avatar: AVATAR("orchestrator"),
+  },
+  asr: {
+    label: "TRTC Speech-to-Text",
+    short: "ASR",
+    text: "text-sky-300",
+    bg: "bg-sky-500/10",
+    border: "border-sky-500/30",
+    dot: "bg-sky-400",
+    avatar: AVATAR("asr"),
   },
   sla_router: {
     label: "SLA & Routing Manager",
@@ -32,6 +46,7 @@ export const AGENT_META: Record<AgentRole, AgentMeta> = {
     bg: "bg-rose-500/10",
     border: "border-rose-500/30",
     dot: "bg-rose-400",
+    avatar: AVATAR("sla_router"),
   },
   evidence_collection: {
     label: "Evidence Collection Agent",
@@ -40,6 +55,7 @@ export const AGENT_META: Record<AgentRole, AgentMeta> = {
     bg: "bg-teal-500/10",
     border: "border-teal-500/30",
     dot: "bg-teal-400",
+    avatar: AVATAR("evidence_collection"),
   },
   evidence: {
     label: "Evidence Engine",
@@ -48,6 +64,7 @@ export const AGENT_META: Record<AgentRole, AgentMeta> = {
     bg: "bg-cyan-500/10",
     border: "border-cyan-500/30",
     dot: "bg-cyan-400",
+    avatar: AVATAR("evidence"),
   },
   fraud: {
     label: "Fraud & Bad-Faith Agent",
@@ -56,6 +73,7 @@ export const AGENT_META: Record<AgentRole, AgentMeta> = {
     bg: "bg-red-500/10",
     border: "border-red-500/30",
     dot: "bg-red-400",
+    avatar: AVATAR("fraud"),
   },
   policy: {
     label: "Policy & Precedent Agent",
@@ -64,6 +82,7 @@ export const AGENT_META: Record<AgentRole, AgentMeta> = {
     bg: "bg-indigo-500/10",
     border: "border-indigo-500/30",
     dot: "bg-indigo-400",
+    avatar: AVATAR("policy"),
   },
   learning: {
     label: "Learning Feedback Loop",
@@ -72,6 +91,7 @@ export const AGENT_META: Record<AgentRole, AgentMeta> = {
     bg: "bg-lime-500/10",
     border: "border-lime-500/30",
     dot: "bg-lime-400",
+    avatar: AVATAR("learning"),
   },
   vision: {
     label: "Image Analysis Agent",
@@ -80,6 +100,7 @@ export const AGENT_META: Record<AgentRole, AgentMeta> = {
     bg: "bg-fuchsia-500/10",
     border: "border-fuchsia-500/30",
     dot: "bg-fuchsia-400",
+    avatar: AVATAR("vision"),
   },
   rider_advocate: {
     label: "Rider Advocate",
@@ -88,6 +109,7 @@ export const AGENT_META: Record<AgentRole, AgentMeta> = {
     bg: "bg-blue-500/10",
     border: "border-blue-500/30",
     dot: "bg-blue-400",
+    avatar: AVATAR("rider_advocate"),
   },
   driver_advocate: {
     label: "Driver Advocate",
@@ -96,6 +118,7 @@ export const AGENT_META: Record<AgentRole, AgentMeta> = {
     bg: "bg-amber-500/10",
     border: "border-amber-500/30",
     dot: "bg-amber-400",
+    avatar: AVATAR("driver_advocate"),
   },
   judge: {
     label: "Judge Agent",
@@ -104,6 +127,7 @@ export const AGENT_META: Record<AgentRole, AgentMeta> = {
     bg: "bg-emerald-500/10",
     border: "border-emerald-500/30",
     dot: "bg-emerald-400",
+    avatar: AVATAR("judge"),
   },
   escalation: {
     label: "Escalation Gate",
@@ -112,6 +136,7 @@ export const AGENT_META: Record<AgentRole, AgentMeta> = {
     bg: "bg-orange-500/10",
     border: "border-orange-500/30",
     dot: "bg-orange-400",
+    avatar: AVATAR("escalation"),
   },
 };
 
@@ -155,6 +180,49 @@ export const FRAUD_VERDICT_META: Record<string, { label: string; className: stri
   },
   likely: { label: "LIKELY", className: "bg-red-500/15 text-red-300 border-red-500/40" },
   confirmed: { label: "CONFIRMED", className: "bg-red-600/20 text-red-200 border-red-500/50" },
+};
+
+/** Phase 3: badge styling for the three evidence modalities. */
+export const MEDIA_KIND_META: Record<
+  string,
+  { label: string; className: string; noun: string }
+> = {
+  image: {
+    label: "IMAGE",
+    className: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/40",
+    noun: "photo",
+  },
+  video: {
+    label: "VIDEO",
+    className: "bg-violet-500/15 text-violet-300 border-violet-500/40",
+    noun: "clip",
+  },
+  audio: {
+    label: "AUDIO",
+    className: "bg-sky-500/15 text-sky-300 border-sky-500/40",
+    noun: "recording",
+  },
+};
+
+/** Cabin-condition severity ladder used by the vision agent. */
+export const SEVERITY_META: Record<string, { label: string; className: string }> = {
+  none: { label: "None", className: "bg-zinc-500/15 text-zinc-300 border-zinc-500/40" },
+  normal_wear: {
+    label: "Normal wear",
+    className: "bg-zinc-500/15 text-zinc-300 border-zinc-500/40",
+  },
+  minor_mess: {
+    label: "Minor mess",
+    className: "bg-amber-500/15 text-amber-300 border-amber-500/40",
+  },
+  liquid_spill: {
+    label: "Liquid spill",
+    className: "bg-orange-500/15 text-orange-300 border-orange-500/40",
+  },
+  major_damage: {
+    label: "Major damage",
+    className: "bg-red-500/15 text-red-300 border-red-500/40",
+  },
 };
 
 export const SUPPORT_META: Record<Support, { label: string; className: string }> = {

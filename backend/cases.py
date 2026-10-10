@@ -10,6 +10,8 @@ DISP-001   route_deviation               Second required text category (expected
 DISP-003   property_damage               Multi-modal vision agent *rejecting* fabricated evidence
 DISP-004   property_damage               Multi-modal vision agent *accepting* valid evidence
 DISP-005   safety_incident               CRITICAL SLA fast-track + mandatory human escalation
+DISP-006   safety_incident               Audio evidence — TRTC ASR transcription of verbal abuse
+DISP-007   property_damage               Video evidence — keyframe extraction from a cabin clip
 =========  ============================  ==========================================
 
 DISP-003/004 exist as a pair on purpose: they prove the judge is not biased
@@ -303,7 +305,8 @@ DISP_003: dict[str, Any] = {
         {
             "attachment_id": "media-disp003-01",
             "media_type": "image",
-            "url": "https://cdn.ryde.example/disputes/DISP-003/cabin_photo_01.jpg",
+            "url": "/assets/miora/disp003_fake_spill.png",
+            "asset_key": "disp003_fake_spill",
             "uploaded_by": "driver",
             "captured_at": "2026-09-14T23:41:00+08:00",
             "device_model": "iPhone 15 Pro",
@@ -395,7 +398,8 @@ DISP_004: dict[str, Any] = {
         {
             "attachment_id": "media-disp004-01",
             "media_type": "image",
-            "url": "https://cdn.ryde.example/disputes/DISP-004/cabin_photo_02.jpg",
+            "url": "/assets/miora/disp004_genuine_spill.png",
+            "asset_key": "disp004_genuine_spill",
             "uploaded_by": "driver",
             "captured_at": "2026-09-16T20:33:00+08:00",
             "device_model": "Samsung Galaxy S24",
@@ -575,15 +579,235 @@ DISP_005: dict[str, Any] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# DISP-006 — Safety Incident with a covert audio recording (Phase 3)
+# ---------------------------------------------------------------------------
+# Exercises the TRTC ASR pipeline: a passenger recording captured inside the
+# trip window, transcribed into speaker turns, scored for hostility and handed
+# to the Evidence Engine, the Fraud Agent and the Judge. Safety incidents are
+# always outside the autonomy boundary, so the expected outcome is escalation
+# with the transcript attached to the reviewer's packet.
+
+DISP_006: dict[str, Any] = {
+    "dispute_ticket": {
+        "dispute_id": "DISP-006",
+        "trip_id": "TRIP-2026-11877",
+        "filed_by": "rider",
+        "dispute_type": "safety_incident",
+        "description": (
+            "The driver screamed at me for the whole ride and threatened me when I asked him to "
+            "slow down. I recorded the argument on my phone — you can hear him say he knows where "
+            "I live. I want this driver taken off the road."
+        ),
+        "filed_at": "2026-09-18T23:55:00+08:00",
+        "status": "open",
+    },
+    "rider_profile": {
+        "rider_id": "R-4471",
+        "name": "Priya Menon",
+        "account_age_days": 640,
+        "total_trips": 96,
+        "avg_rating": 4.8,
+        "dispute_history": {"total_disputes": 1, "upheld": 1, "rejected": 0},
+        "fraud_flags": 0,
+        "payment_method": "visa_8891",
+    },
+    "driver_profile": {
+        "driver_id": "D-77312",
+        "name": "Sulaiman bin Osman",
+        "account_age_days": 420,
+        "total_trips": 1180,
+        "avg_rating": 4.1,
+        "dispute_history": {"total_disputes": 3, "upheld_against": 2, "rejected": 1},
+        "fraud_flags": 1,
+        "vehicle": "Honda HR-V (SJB 7731 X)",
+    },
+    "trip_data": {
+        "trip_id": "TRIP-2026-11877",
+        "rider_id": "R-4471",
+        "driver_id": "D-77312",
+        "pickup_location": {"name": "Clarke Quay MRT", "lat": 1.2886, "lng": 103.8460},
+        "dropoff_location": {"name": "Ang Mo Kio Ave 3", "lat": 1.3691, "lng": 103.8454},
+        "trip_start_time": "2026-09-18T23:28:00+08:00",
+        "trip_end_time": "2026-09-18T23:49:00+08:00",
+        "actual_distance_km": 12.4,
+        "actual_duration_min": 21,
+        "fare_estimate": 22.00,
+        "fare_charged": 22.00,
+    },
+    "gps_telemetry": [
+        {"timestamp": "2026-09-18T23:28:00+08:00", "lat": 1.2886, "lng": 103.8460, "speed_kmh": 0, "status": "trip_start"},
+        {"timestamp": "2026-09-18T23:35:00+08:00", "lat": 1.3120, "lng": 103.8471, "speed_kmh": 74, "status": "en_route"},
+        {"timestamp": "2026-09-18T23:41:00+08:00", "lat": 1.3340, "lng": 103.8462, "speed_kmh": 88, "status": "en_route"},
+        {"timestamp": "2026-09-18T23:44:00+08:00", "lat": 1.3521, "lng": 103.8459, "speed_kmh": 15, "status": "harsh_braking"},
+        {"timestamp": "2026-09-18T23:49:00+08:00", "lat": 1.3691, "lng": 103.8454, "speed_kmh": 0, "status": "completed"},
+    ],
+    "chat_logs": [
+        {"timestamp": "2026-09-18T23:38:00+08:00", "sender": "rider", "type": "message", "content": "Please slow down, you are going too fast on this road."},
+        {"timestamp": "2026-09-18T23:39:00+08:00", "sender": "driver", "type": "message", "content": "Do not tell me how to drive."},
+        {"timestamp": "2026-09-18T23:50:00+08:00", "sender": "rider", "type": "message", "content": "I have recorded the whole argument, I am filing a safety report."},
+    ],
+    "app_events": [
+        {"timestamp": "2026-09-18T23:44:00+08:00", "event_type": "harsh_braking_detected", "details": "Harsh braking logged at 88 km/h on the CTE exit."},
+        {"timestamp": "2026-09-18T23:45:00+08:00", "event_type": "safety_recording_started", "details": "Rider activated the in-app safety recorder; 42 s captured."},
+        {"timestamp": "2026-09-18T23:49:00+08:00", "event_type": "trip_completed", "details": "Trip completed. 12.4 km, 21 min. Fare $22.00 charged."},
+        {"timestamp": "2026-09-18T23:55:00+08:00", "event_type": "safety_complaint_filed", "details": "Rider filed a safety complaint with an audio recording attached."},
+    ],
+    "media_attachments": [
+        {
+            "attachment_id": "media-disp006-audio",
+            "media_type": "audio",
+            "url": "/media/samples/disp006_argument.wav",
+            "uploaded_by": "rider",
+            "captured_at": "2026-09-18T23:41:00+08:00",
+            "device_model": "in-app safety recorder (iPhone 14)",
+            "gps_lat": 1.3340,
+            "gps_lng": 103.8462,
+            "exif_present": True,
+            "ai_generated_probability": 0.02,
+            "duration_s": 42.0,
+            "local_path": "samples/disp006_argument.wav",
+            "asset_key": "disp006_argument",
+            "caption": "Covert cabin recording of the argument during the trip",
+            # Scripted dialogue for the deterministic ASR: the same file always
+            # transcribes to the same transcript, so the ruling is replayable.
+            "transcript_hint": (
+                "driver: You stupid passenger, shut up and sit there! | "
+                "rider: Please slow down, you are scaring me. | "
+                "driver: I will find you after this trip, I know where you live! | "
+                "rider: I am recording this, stop the car. | "
+                "driver: Say one more word and I will break your phone."
+            ),
+        }
+    ],
+    "cancellation_policy": {
+        "free_wait_time_min": 5,
+        "cancellation_fee_after_wait": 5.00,
+        "no_show_threshold_min": 8,
+        "fee_goes_to": "driver_compensation",
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# DISP-007 — Property Damage with cabin video evidence (Phase 3)
+# ---------------------------------------------------------------------------
+# Exercises the video ingestion pipeline: a 6-second cabin clip is decoded at
+# 1 fps, the keyframes are cross-referenced against the trip timeline and the
+# Vision Agent's finding is cited by the Judge in its reasoning.
+
+DISP_007: dict[str, Any] = {
+    "dispute_ticket": {
+        "dispute_id": "DISP-007",
+        "trip_id": "TRIP-2026-12140",
+        "filed_by": "driver",
+        "dispute_type": "property_damage",
+        "description": (
+            "The rider spilled bubble tea all over the rear bench seat and then denied it. My "
+            "cabin camera recorded the whole thing — the clip shows the drink going over and the "
+            "seat soaked at dropoff. I am claiming the $60 cleaning fee with the video."
+        ),
+        "filed_at": "2026-09-20T21:40:00+08:00",
+        "status": "open",
+    },
+    "rider_profile": {
+        "rider_id": "R-8890",
+        "name": "Daniel Chua",
+        "account_age_days": 75,
+        "total_trips": 12,
+        "avg_rating": 4.4,
+        "dispute_history": {"total_disputes": 1, "upheld": 0, "rejected": 1},
+        "fraud_flags": 0,
+        "payment_method": "credit_card",
+    },
+    "driver_profile": {
+        "driver_id": "D-2290",
+        "name": "Nurul Huda",
+        "account_age_days": 980,
+        "total_trips": 2640,
+        "avg_rating": 4.89,
+        "dispute_history": {"total_disputes": 0, "upheld_against": 0, "rejected": 0},
+        "fraud_flags": 0,
+        "vehicle": "Honda HR-V (SKT 2290 B)",
+    },
+    "trip_data": {
+        "trip_id": "TRIP-2026-12140",
+        "rider_id": "R-8890",
+        "driver_id": "D-2290",
+        "pickup_location": {"name": "Somerset 313", "lat": 1.3010, "lng": 103.8380},
+        "dropoff_location": {"name": "Serangoon Nex", "lat": 1.3550, "lng": 103.8710},
+        "trip_start_time": "2026-09-20T21:10:00+08:00",
+        "trip_end_time": "2026-09-20T21:34:00+08:00",
+        "actual_distance_km": 9.8,
+        "actual_duration_min": 24,
+        "fare_estimate": 18.50,
+        "fare_charged": 18.50,
+        "cleaning_fee_claimed": 60.00,
+    },
+    "gps_telemetry": [
+        {"timestamp": "2026-09-20T21:10:00+08:00", "lat": 1.3010, "lng": 103.8380, "speed_kmh": 0, "status": "trip_start"},
+        {"timestamp": "2026-09-20T21:18:00+08:00", "lat": 1.3220, "lng": 103.8510, "speed_kmh": 38, "status": "en_route"},
+        {"timestamp": "2026-09-20T21:27:00+08:00", "lat": 1.3410, "lng": 103.8630, "speed_kmh": 42, "status": "en_route"},
+        {"timestamp": "2026-09-20T21:34:00+08:00", "lat": 1.3550, "lng": 103.8710, "speed_kmh": 0, "status": "completed"},
+    ],
+    "chat_logs": [
+        {"timestamp": "2026-09-20T21:30:00+08:00", "sender": "driver", "type": "message", "content": "Please be careful with the drink, it is not covered."},
+        {"timestamp": "2026-09-20T21:35:00+08:00", "sender": "rider", "type": "message", "content": "It did not spill, nothing happened."},
+        {"timestamp": "2026-09-20T21:37:00+08:00", "sender": "driver", "type": "message", "content": "My cabin camera recorded it, I am filing the cleaning claim."},
+    ],
+    "app_events": [
+        {"timestamp": "2026-09-20T21:34:00+08:00", "event_type": "trip_completed", "details": "Trip completed. 9.8 km, 24 min. Fare $18.50 charged."},
+        {"timestamp": "2026-09-20T21:36:00+08:00", "event_type": "evidence_uploaded", "details": "Driver uploaded 1 video as evidence (cabin_clip_01.mp4, 6 s). Capture time 21:36."},
+        {"timestamp": "2026-09-20T21:40:00+08:00", "event_type": "cleaning_claim_filed", "details": "Driver D-2290 filed a cleaning claim of $60.00 supported by video evidence."},
+    ],
+    "media_attachments": [
+        {
+            "attachment_id": "media-disp007-video",
+            "media_type": "video",
+            "url": "/media/samples/disp007_cabin.mp4",
+            "uploaded_by": "driver",
+            "captured_at": "2026-09-20T21:36:00+08:00",
+            "device_model": "70mai cabin dashcam",
+            "gps_lat": 1.3550,
+            "gps_lng": 103.8710,
+            "exif_present": True,
+            "ai_generated_probability": 0.05,
+            "duration_s": 6.0,
+            "local_path": "samples/disp007_cabin.mp4",
+            "asset_key": "disp007_cabin",
+            "caption": "Cabin camera shows bubble tea soaking into the rear bench seat at dropoff",
+        }
+    ],
+    "cancellation_policy": {
+        "free_wait_time_min": 5,
+        "cancellation_fee_after_wait": 5.00,
+        "no_show_threshold_min": 8,
+        "fee_goes_to": "driver_compensation",
+    },
+}
+
+
 CASE_REGISTRY: dict[str, dict[str, Any]] = {
     "DISP-001": DISP_001,
     "DISP-002": DISP_002,
     "DISP-003": DISP_003,
     "DISP-004": DISP_004,
     "DISP-005": DISP_005,
+    "DISP-006": DISP_006,
+    "DISP-007": DISP_007,
 }
 
-CASE_META: dict[str, dict[str, str]] = {
+#: Miora-generated mock evidence rendered by the UI (``frontend/public/assets/miora``).
+MIORA_ASSETS: dict[str, list[str]] = {
+    "DISP-001": ["/assets/miora/disp001_route_deviation.png"],
+    "DISP-002": ["/assets/miora/disp002_no_show_chat.png"],
+    "DISP-003": ["/assets/miora/disp003_fake_spill.png"],
+    "DISP-004": ["/assets/miora/disp004_genuine_spill.png"],
+    "DISP-006": ["/assets/miora/disp006_dashcam.png"],
+    "DISP-007": ["/assets/miora/disp007_poster.png"],
+}
+
+CASE_META: dict[str, dict[str, Any]] = {
     "DISP-001": {
         "title": "Route Deviation — Raffles Place to Paya Lebar",
         "blurb": "Rider says the driver detoured north and inflated the fare from $20 to $28.",
@@ -612,6 +836,24 @@ CASE_META: dict[str, dict[str, str]] = {
         ),
         "expected_ruling": "ESCALATED TO HUMAN — safety incidents are never auto-resolved",
     },
+    "DISP-006": {
+        "title": "Safety Incident — verbal abuse on tape",
+        "blurb": (
+            "Rider submits a 42 s covert cabin recording; TRTC ASR transcribes threats and "
+            "abuse. Audio evidence — always escalated to a human reviewer."
+        ),
+        "expected_ruling": (
+            "ESCALATED TO HUMAN — transcript shows an explicit threat (hostility ~0.9)"
+        ),
+    },
+    "DISP-007": {
+        "title": "Property Damage — cabin video claim",
+        "blurb": (
+            "Driver submits a 6 s cabin clip; the pipeline samples 1 keyframe/s and the "
+            "Vision Agent confirms a liquid spill inside the trip window."
+        ),
+        "expected_ruling": "COMPENSATE DRIVER — $60, corroborated by extracted keyframes",
+    },
 }
 
 
@@ -631,6 +873,7 @@ def list_cases() -> list[CaseSummary]:
                 expected_ruling=meta["expected_ruling"],
                 filed_by=ticket["filed_by"],
                 multimodal=bool(payload.get("media_attachments")),
+                evidence_assets=MIORA_ASSETS.get(case_id, []),
             )
         )
     return summaries

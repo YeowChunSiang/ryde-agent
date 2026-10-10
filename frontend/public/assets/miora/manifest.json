@@ -1,0 +1,28 @@
+{
+  "generator": "scripts/generate_mock_assets.py",
+  "note": "Assets are locally rendered stand-ins for Tencent Miora output. Replace any file with a real Miora render of the recorded prompt \u2014 the UI references them by name.",
+  "assets": {
+    "disp001_route_deviation.png": "A high-fidelity UI mockup of a ride-hailing app map on a smartphone. The map shows a straight-line suggested route in blue, but the actual GPS track taken by the car is in red, showing a wildly inefficient looping path through dense city traffic.",
+    "disp002_no_show_chat.png": "A UI mockup of a ride-hailing chat screen. The driver has sent three messages saying 'I am at the lobby' and 'Waiting for 5 minutes', with no replies from the passenger. A prominent digital wait-timer overlay displays '08:00 elapsed'.",
+    "disp004_genuine_spill.png": "A realistic smartphone photo of the back seat of a Honda HR-V. A large, wet coffee spill is soaking into the fabric seat. The photo has a visible digital timestamp overlay reading '2026-09-13 09:15 AM' to match the trip completion time.",
+    "disp003_fake_spill.png": "An AI-generated, slightly unrealistic image of french fries and ketchup scattered on a car seat, with subtle visual artifacts and missing EXIF data, simulating a fraudulent 'vomit fraud' cleaning fee claim.",
+    "disp006_dashcam.png": "Interior dashcam footage from a ride-hailing vehicle. The driver is turned around, aggressively gesturing toward the back seat. A dashboard clock reads '11:45 PM'.",
+    "disp007_poster.png": "Poster frame of a short cabin-camera clip: bubble tea soaking into the rear bench seat of a Honda HR-V, captured seconds after dropoff.",
+    "agents/<role>.png": "Flat vector avatar for a dispute-resolution AI agent: rounded square badge, gradient background in the agent's accent colour, three-letter monogram, thin white ring."
+  },
+  "agent_avatars": {
+    "orchestrator": "#94a3b8",
+    "sla_router": "#fb7185",
+    "evidence_collection": "#2dd4bf",
+    "evidence": "#22d3ee",
+    "fraud": "#ef4444",
+    "policy": "#818cf8",
+    "asr": "#f59e0b",
+    "vision": "#e879f9",
+    "rider_advocate": "#60a5fa",
+    "driver_advocate": "#fbbf24",
+    "judge": "#34d399",
+    "escalation": "#fb923c",
+    "learning": "#a3e635"
+  }
+}

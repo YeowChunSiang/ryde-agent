@@ -30,14 +30,16 @@ Fill the entries below into the submission form.
   opacity, scalability.
 
 ### Comprehensive solution design
-- **Business architecture:** nine-agent arbitration pipeline (SLA routing →
-  evidence + collection + fraud + precedent in parallel → vision → parallel
-  rider/driver advocates → judge → escalation gate) with a human-in-the-loop
-  override that feeds a learning loop.
+- **Business architecture:** ten-agent arbitration pipeline (SLA routing →
+  **TRTC media ingestion (ASR + keyframes)** → evidence + collection + fraud
+  + precedent in parallel → vision → parallel rider/driver advocates → judge
+  → escalation gate) with a human-in-the-loop override that feeds a learning
+  loop.
 - **Technical architecture:** pure Python 3.11 + FastAPI + Pydantic v2 +
-  httpx; React 19 + Vite + shadcn/ui console. Tennet Cloud ADP for
-  inference (with a deterministic offline reasoner fallback so the demo
-  works without credentials).
+  httpx; React 19 + Vite + shadcn/ui console. Tencent Cloud TRTC for ASR
+  (with a deterministic simulated client fallback) and `ffmpeg-python` for
+  keyframe extraction. Tennet Cloud ADP for inference (with a deterministic
+  offline reasoner fallback so the demo works without credentials).
 - **How prompts drive AI generation:** every agent system prompt pins
   its model call to a strict JSON output contract; the LLM is *only*
   allowed to argue over facts that Python already computed, never to
@@ -46,7 +48,8 @@ Fill the entries below into the submission form.
 - **Autonomy boundary:** SLA priority decides the queue, the fraud and
   precedent agents feed the judge as context, and confidence below 70%
   (or any safety incident) hands the case to a human with a full
-  escalation packet.
+  escalation packet. Safety ASR transcripts override the autonomy
+  threshold under policy `SAFETY-2`.
 
 ### Business value
 - Cuts average resolution time from 24–72 hours to **< 1 second** for
@@ -84,6 +87,13 @@ This conversation log is the proof.
    weaknesses** for adversarial honesty.
 5. `05_full_pipeline_stream.png` — the live inter-agent
    communication feed (the observability requirement).
+6. `06_disp006_audio.png` — TRTC ASR pipeline: the in-app safety
+   recording is transcribed into 5 turns, the threat is flagged,
+   the judge escalates the case and references the transcript in
+   `key_findings`.
+7. `07_disp007_video.png` — Vision Agent upgrade: a 6 s cabin clip is
+   decomposed into 6 keyframes at 1 fps; the ruling cites the keyframes
+   and awards the $60 cleaning fee against a `liquid_spill` verdict.
 
 ## Project link
 Set `ADP_APP_KEY` and run `python -m uvicorn main:app --port 3000`

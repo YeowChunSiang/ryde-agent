@@ -15,6 +15,7 @@ export type Support = "rider" | "driver" | "neutral";
 export type AgentRole =
   | "orchestrator"
   | "sla_router"
+  | "asr"
   | "evidence_collection"
   | "evidence"
   | "fraud"
@@ -61,6 +62,8 @@ export interface CaseSummary {
   expected_ruling: string;
   filed_by: string;
   multimodal: boolean;
+  /** Phase 3: bundled Miora evidence assets rendered in the Evidence panel. */
+  evidence_assets?: string[];
 }
 
 export interface Fact {
@@ -107,6 +110,10 @@ export interface VisionFinding {
   severity: string;
   anomalies: string[];
   reasoning: string;
+  // --- Phase 3: multi-modal ----------------------------------------------
+  media_kind?: "image" | "video" | "audio";
+  video?: VideoAnalysis | null;
+  transcript?: AudioTranscript | null;
 }
 
 export interface AdvocateArgument {
@@ -132,6 +139,73 @@ export interface Ruling {
   driver_summary: string;
   escalated: boolean;
   escalation_reason: string | null;
+}
+
+// --- Phase 3: multi-modal audio (TRTC ASR) + video (keyframe) evidence -----
+
+export interface AudioSegment {
+  speaker: "rider" | "driver" | "unknown";
+  start_s: number;
+  end_s: number;
+  text: string;
+  hostility: number;
+}
+
+export interface AudioTranscript {
+  attachment_id: string;
+  /** Web path of the source clip, so the UI can play it back next to the text. */
+  source_url: string | null;
+  engine: "trtc" | "simulated";
+  language: string;
+  duration_s: number;
+  confidence: number;
+  segments: AudioSegment[];
+  full_text: string;
+  hostility_score: number;
+  threat_detected: boolean;
+  keywords: string[];
+  summary: string;
+}
+
+export interface VideoFrame {
+  index: number;
+  timestamp_s: number;
+  path: string;
+  width: number | null;
+  height: number | null;
+  mean_luminance: number | null;
+  motion_score: number | null;
+  label: string | null;
+}
+
+export interface VideoAnalysis {
+  attachment_id: string;
+  /** Web path of the source clip, so the UI can play it back next to the frames. */
+  source_url: string | null;
+  duration_s: number;
+  fps: number | null;
+  width: number | null;
+  height: number | null;
+  frames_extracted: number;
+  frames: VideoFrame[];
+  anomalies: string[];
+  severity: string;
+  reasoning: string;
+  engine: "ffmpeg" | "opencv" | "unavailable";
+}
+
+/** Response of `POST /upload-audio` and `POST /upload-video`. */
+export interface MediaUploadResult {
+  status: string;
+  dispute_id: string;
+  attachment_id: string;
+  media_type: "audio" | "video";
+  filename: string;
+  web_path: string;
+  duration_s?: number | null;
+  transcript?: AudioTranscript | null;
+  video?: VideoAnalysis | null;
+  message?: string | null;
 }
 
 // --- Phase 2: SLA routing, ingestion, fraud, precedent, escalation ---------
@@ -296,12 +370,18 @@ export interface Health {
   adp_configured: boolean;
   escalation_threshold: number;
   runs: number;
+  // --- Phase 3 -----------------------------------------------------------
+  asr_engine?: string;
+  video_backend?: string;
+  ffmpeg_available?: boolean;
+  uploaded_media?: number;
 }
 
 /** Pipeline stages, in execution order — used for the progress rail. */
 export const STAGES: { id: string; label: string; agent: AgentRole }[] = [
   { id: "intake", label: "Intake", agent: "orchestrator" },
   { id: "sla", label: "SLA Routing", agent: "sla_router" },
+  { id: "media", label: "Media Ingestion", agent: "asr" },
   { id: "evidence", label: "Evidence", agent: "evidence" },
   { id: "collection", label: "External Collection", agent: "evidence_collection" },
   { id: "risk", label: "Fraud & Precedent", agent: "fraud" },
@@ -315,6 +395,15 @@ export const STAGES: { id: string; label: string; agent: AgentRole }[] = [
 export function stageOf(stage: string): string {
   if (stage.startsWith("intake")) return "intake";
   if (stage.startsWith("sla") || stage.startsWith("routing")) return "sla";
+  // Phase 3: TRTC transcription and keyframe extraction run as their own stage
+  // before the evidence engine folds their output into the fact table.
+  if (
+    stage.startsWith("audio") ||
+    stage.startsWith("video") ||
+    stage.startsWith("media") ||
+    stage.startsWith("transcri")
+  )
+    return "media";
   if (stage.startsWith("evidence") || stage === "risk_signal") return "evidence";
   // The parallel fan-out (collection + fraud + precedent) is dispatched from the
   // evidence stage and lands on the risk stage when the slowest branch returns.

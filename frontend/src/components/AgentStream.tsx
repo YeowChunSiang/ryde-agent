@@ -80,6 +80,22 @@ export function AgentStream({ events, streaming }: Props) {
                 )}
               >
                 <div className="flex flex-wrap items-center gap-2">
+                  <img
+                    src={meta.avatar}
+                    alt=""
+                    width={22}
+                    height={22}
+                    loading="lazy"
+                    className={cn(
+                      "h-[22px] w-[22px] shrink-0 rounded-md border object-cover",
+                      meta.border,
+                      meta.bg,
+                    )}
+                    onError={(e) => {
+                      // Fall back to the monogram chip if an avatar is missing.
+                      e.currentTarget.style.display = "none";
+                    }}
+                  />
                   <span
                     className={cn(
                       "rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wider",

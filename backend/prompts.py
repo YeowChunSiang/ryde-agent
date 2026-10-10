@@ -238,24 +238,53 @@ def _render_chat(case: DisputeCase) -> str:
 
 def build_vision_prompt(case: DisputeCase, attachment: MediaAttachment) -> str:
     trip = case.trip_data
-    return "\n".join(
-        [
-            _render_case_context(case),
-            "\n## MEDIA UNDER ANALYSIS",
-            f"- attachment_id: {attachment.attachment_id}",
-            f"- url: {attachment.url}",
-            f"- uploaded_by: {attachment.uploaded_by}",
-            f"- exif_captured_at: {attachment.captured_at.isoformat() if attachment.captured_at else 'missing'}",
-            f"- exif_present: {attachment.exif_present}",
-            f"- device: {attachment.device_model or 'unknown'}",
-            f"- heuristic ai_generated_probability: {attachment.ai_generated_probability}",
-            f"- caption/claim: {attachment.caption or 'n/a'}",
-            f"- trip_end: {trip.trip_end_time.isoformat() if trip.trip_end_time else 'n/a'}",
-            "\n## OUTPUT CONTRACT",
-            json.dumps(VISION_JSON_CONTRACT, indent=2),
-            _JSON_RULE,
-        ]
-    )
+    lines = [
+        _render_case_context(case),
+        "\n## MEDIA UNDER ANALYSIS",
+        f"- attachment_id: {attachment.attachment_id}",
+        f"- media_type: {attachment.media_type}",
+        f"- url: {attachment.url}",
+        f"- uploaded_by: {attachment.uploaded_by}",
+        f"- exif_captured_at: {attachment.captured_at.isoformat() if attachment.captured_at else 'missing'}",
+        f"- exif_present: {attachment.exif_present}",
+        f"- device: {attachment.device_model or 'unknown'}",
+        f"- heuristic ai_generated_probability: {attachment.ai_generated_probability}",
+        f"- caption/claim: {attachment.caption or 'n/a'}",
+        f"- trip_end: {trip.trip_end_time.isoformat() if trip.trip_end_time else 'n/a'}",
+    ]
+
+    # Phase 3: give the model the derived multi-modal context (never raw bytes).
+    if attachment.media_type == "video" and attachment.video is not None:
+        vid = attachment.video
+        lines.append("\n## EXTRACTED KEYFRAMES (1 fps sampling)")
+        lines.append(
+            f"- duration: {vid.duration_s:.1f}s, {vid.width}x{vid.height}, "
+            f"{vid.fps} fps, {vid.frames_extracted} frame(s)"
+        )
+        for frame in vid.frames[:12]:
+            lines.append(
+                f"  - frame {frame.index:02d} @ {frame.timestamp_s:.1f}s — luminance "
+                f"{frame.mean_luminance}, motion {frame.motion_score} ({frame.path})"
+            )
+        if vid.anomalies:
+            lines.append("- integrity flags: " + "; ".join(vid.anomalies))
+
+    if attachment.media_type == "audio" and attachment.transcript is not None:
+        tr = attachment.transcript
+        lines.append("\n## ASR TRANSCRIPT (TRTC)")
+        lines.append(
+            f"- engine: {tr.engine}, duration {tr.duration_s:.1f}s, confidence {tr.confidence:.2f}"
+        )
+        lines.append(f"- hostility_score: {tr.hostility_score:.2f}, threat: {tr.threat_detected}")
+        for seg in tr.segments[:12]:
+            lines.append(f"  - [{seg.start_s:.1f}-{seg.end_s:.1f}s] {seg.speaker}: {seg.text}")
+
+    lines += [
+        "\n## OUTPUT CONTRACT",
+        json.dumps(VISION_JSON_CONTRACT, indent=2),
+        _JSON_RULE,
+    ]
+    return "\n".join(lines)
 
 
 def build_advocate_prompt(

@@ -24,26 +24,30 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from cases import CASE_REGISTRY, get_case, list_cases
 from config import get_settings
+from media_store import MediaStore, media_type_for
 from models import (
     AgentRole,
     DisputeAccepted,
     DisputeCase,
     DisputeRequest,
     EventLevel,
+    MediaAttachment,
     OverrideAccepted,
     OverrideRequest,
     ResolutionResult,
 )
 from orchestrator import Orchestrator, RunBroker, event_stream
+from trtc_client import SimulatedASRClient, build_asr_provider, probe_audio_duration
+from vision_utils import VideoProcessingError, analyse_video, backend_name, ffmpeg_available
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,7 +57,10 @@ logger = logging.getLogger("ryderesolve")
 
 settings = get_settings()
 broker = RunBroker()
+media_store = MediaStore(settings)
 orchestrator = Orchestrator(settings, broker)
+orchestrator.media_store = media_store  # one registry for uploads and playback URLs
+asr_provider = build_asr_provider(settings)
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
@@ -107,12 +114,21 @@ app.add_middleware(
 
 def _resolve_case(payload: DisputeRequest) -> DisputeCase:
     if payload.case is not None:
-        return payload.case
-    assert payload.case_id is not None
-    try:
-        return get_case(payload.case_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        case = payload.case
+    else:
+        assert payload.case_id is not None
+        try:
+            case = get_case(payload.case_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # Graft anything uploaded earlier through /upload-audio or /upload-video
+    # onto the dossier, keyed by the case or dispute id.
+    merged = media_store.merge_into(case)
+    if merged:
+        logger.info(
+            "attached %d uploaded media payload(s) to %s", len(merged), case.dispute_id
+        )
+    return case
 
 
 def _accepted(run) -> DisputeAccepted:
@@ -175,6 +191,11 @@ async def health() -> dict:
         "demo_pacing_ms": settings.offline_demo_pacing_ms,
         "knowledge_base_precedents": orchestrator.knowledge_base_size,
         "runs": len(broker.runs),
+        # --- Phase 3: multi-modal capability report -------------------------
+        "asr_engine": "trtc" if settings.trtc_secret_id else "simulated",
+        "video_backend": backend_name(),
+        "ffmpeg_available": ffmpeg_available(),
+        "uploaded_media": sum(len(media_store.pending(k)) for k in media_store.all_keys()),
     }
 
 
@@ -188,6 +209,188 @@ async def case_detail(case_id: str) -> dict:
     if case_id not in CASE_REGISTRY:
         raise HTTPException(status_code=404, detail=f"Unknown case '{case_id}'")
     return CASE_REGISTRY[case_id]
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: multi-modal ingestion (audio + video)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/upload-audio")
+async def upload_audio(
+    file: UploadFile = File(...),
+    case_id: Optional[str] = Form(default=None),
+    uploaded_by: str = Form(default="rider"),
+    captured_at: Optional[str] = Form(default=None),
+    caption: Optional[str] = Form(default=None),
+    transcript_hint: Optional[str] = Form(default=None),
+) -> dict:
+    """Ingest an audio recording and transcribe it with TRTC ASR.
+
+    Accepts an in-app safety recording or a passenger's covert recording. The
+    transcript is attached to the case's ``media_attachments`` so the Evidence
+    Engine, the Fraud Agent and the Judge can all weigh it.
+
+    Without TRTC credentials the deterministic simulated ASR runs instead, so
+    the endpoint is always demoable (and testable in CI).
+    """
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty audio payload")
+    kind = media_type_for(file.filename or "clip.wav")
+    if kind != "audio":
+        raise HTTPException(
+            status_code=415, detail=f"'{file.filename}' is not an audio payload"
+        )
+
+    saved = media_store.save(file.filename or "clip.wav", raw, "audio")
+    duration = probe_audio_duration(saved)
+
+    attachment = MediaAttachment(
+        media_type="audio",
+        url=media_store.web_path(saved),
+        uploaded_by="rider" if uploaded_by not in ("rider", "driver") else uploaded_by,  # type: ignore[arg-type]
+        captured_at=_parse_dt(captured_at),
+        device_model="in-app safety recorder",
+        exif_present=True,
+        caption=caption or (file.filename or "audio evidence"),
+        duration_s=duration,
+        local_path=str(saved),
+    )
+    # Simulation knob: without TRTC credentials the deterministic ASR needs a
+    # script to "hear". Real deployments leave this empty and the live ASR
+    # transcribes the actual waveform.
+    if transcript_hint:
+        attachment.transcript_hint = transcript_hint  # type: ignore[attr-defined]
+
+    try:
+        transcript = await asr_provider.transcribe(attachment)
+    except Exception as exc:  # live ASR failure -> deterministic fallback
+        logger.warning("TRTC ASR failed (%s); using simulated transcription", exc)
+        transcript = await SimulatedASRClient(settings).transcribe(attachment)
+        transcript.engine = "simulated"
+    attachment.transcript = transcript
+
+    if case_id:
+        media_store.attach(case_id, attachment)
+    logger.info(
+        "audio uploaded: %s (%s, %.1fs, hostility %.2f, threat=%s)",
+        attachment.attachment_id,
+        file.filename,
+        transcript.duration_s,
+        transcript.hostility_score,
+        transcript.threat_detected,
+    )
+    web_path = media_store.web_path(saved)
+    return {
+        # Flat summary the UI renders directly.
+        "status": "transcribed",
+        "dispute_id": case_id,
+        "attachment_id": attachment.attachment_id,
+        "media_type": "audio",
+        "filename": file.filename or "clip.wav",
+        "web_path": web_path,
+        "duration_s": transcript.duration_s,
+        "transcript": transcript.model_dump(mode="json"),
+        # Full dossier attachment, for callers that want everything.
+        "attachment": attachment.model_dump(mode="json"),
+        "stored_at": web_path,
+        "attached_to": case_id,
+        "asr_engine": transcript.engine,
+    }
+
+
+@app.post("/upload-video")
+async def upload_video(
+    file: UploadFile = File(...),
+    case_id: Optional[str] = Form(default=None),
+    uploaded_by: str = Form(default="driver"),
+    captured_at: Optional[str] = Form(default=None),
+    caption: Optional[str] = Form(default=None),
+) -> dict:
+    """Ingest a dashcam / cabin video and extract keyframes for the vision agent.
+
+    The clip is decoded at 1 frame per second (configurable) and the resulting
+    frames are served back at ``/media/frames/...`` so a reviewer can scrub the
+    exact frames the agent reasoned over.
+    """
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty video payload")
+    kind = media_type_for(file.filename or "clip.mp4")
+    if kind != "video":
+        raise HTTPException(
+            status_code=415, detail=f"'{file.filename}' is not a video payload"
+        )
+
+    saved = media_store.save(file.filename or "clip.mp4", raw, "video")
+    attachment = MediaAttachment(
+        media_type="video",
+        url=media_store.web_path(saved),
+        uploaded_by="driver" if uploaded_by not in ("rider", "driver") else uploaded_by,  # type: ignore[arg-type]
+        captured_at=_parse_dt(captured_at),
+        device_model="dashcam",
+        exif_present=True,
+        caption=caption or (file.filename or "video evidence"),
+        local_path=str(saved),
+    )
+
+    try:
+        analysis = await asyncio.to_thread(
+            analyse_video, saved, settings, attachment.attachment_id
+        )
+    except VideoProcessingError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    attachment.video = analysis
+    attachment.duration_s = analysis.duration_s
+
+    if case_id:
+        media_store.attach(case_id, attachment)
+    logger.info(
+        "video uploaded: %s (%s, %.1fs, %d keyframes)",
+        attachment.attachment_id,
+        file.filename,
+        analysis.duration_s,
+        analysis.frames_extracted,
+    )
+    web_path = media_store.web_path(saved)
+    return {
+        # Flat summary the UI renders directly.
+        "status": "analysed",
+        "dispute_id": case_id,
+        "attachment_id": attachment.attachment_id,
+        "media_type": "video",
+        "filename": file.filename or "clip.mp4",
+        "web_path": web_path,
+        "duration_s": analysis.duration_s,
+        "video": analysis.model_dump(mode="json"),
+        # Full dossier attachment, for callers that want everything.
+        "attachment": attachment.model_dump(mode="json"),
+        "stored_at": web_path,
+        "attached_to": case_id,
+        "video_backend": analysis.engine,
+    }
+
+
+@app.get("/media/uploads")
+async def list_uploads() -> dict:
+    """Everything uploaded so far, grouped by the case it is attached to."""
+    return {
+        "cases": media_store.all_keys(),
+        "attachments": {
+            key: [a.model_dump(mode="json") for a in media_store.pending(key)]
+            for key in media_store.all_keys()
+        },
+    }
+
+
+def _parse_dt(value: Optional[str]):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 @app.post("/dispute", response_model=DisputeAccepted)
@@ -374,6 +577,58 @@ async def api_precedents() -> dict:
 @app.get("/api/escalations")
 async def api_escalations() -> dict:
     return await escalations()
+
+
+@app.post("/api/upload-audio")
+async def api_upload_audio(
+    file: UploadFile = File(...),
+    case_id: Optional[str] = Form(default=None),
+    uploaded_by: str = Form(default="rider"),
+    captured_at: Optional[str] = Form(default=None),
+    caption: Optional[str] = Form(default=None),
+    transcript_hint: Optional[str] = Form(default=None),
+) -> dict:
+    return await upload_audio(file, case_id, uploaded_by, captured_at, caption, transcript_hint)
+
+
+@app.post("/api/upload-video")
+async def api_upload_video(
+    file: UploadFile = File(...),
+    case_id: Optional[str] = Form(default=None),
+    uploaded_by: str = Form(default="driver"),
+    captured_at: Optional[str] = Form(default=None),
+    caption: Optional[str] = Form(default=None),
+) -> dict:
+    return await upload_video(file, case_id, uploaded_by, captured_at, caption)
+
+
+@app.get("/api/media/uploads")
+async def api_list_uploads() -> dict:
+    return await list_uploads()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: serve ingested media + extracted keyframes
+# ---------------------------------------------------------------------------
+
+FRAME_ROOT = Path(settings.frame_dir)
+if not FRAME_ROOT.is_absolute():
+    FRAME_ROOT = (Path(__file__).resolve().parent / FRAME_ROOT).resolve()
+FRAME_ROOT.mkdir(parents=True, exist_ok=True)
+media_store.root.mkdir(parents=True, exist_ok=True)
+
+# More specific mounts first — Starlette matches routes in registration order.
+for prefix in ("/media/frames", "/api/media/frames"):
+    app.mount(prefix, StaticFiles(directory=str(FRAME_ROOT)), name=f"frames{prefix}")
+for prefix in ("/media", "/api/media"):
+    app.mount(prefix, StaticFiles(directory=str(media_store.root)), name=f"media{prefix}")
+
+logger.info(
+    "Serving ingested media from %s and extracted keyframes from %s (video backend: %s)",
+    media_store.root,
+    FRAME_ROOT,
+    backend_name(),
+)
 
 
 # ---------------------------------------------------------------------------

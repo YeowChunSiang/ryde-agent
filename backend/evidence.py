@@ -855,6 +855,155 @@ def _analyse_safety_incident(case: DisputeCase, packet: EvidencePacket) -> None:
     )
 
 
+def _analyse_audio_evidence(case: DisputeCase, packet: EvidencePacket) -> None:
+    """Turn ASR transcripts into auditable facts (Phase 3).
+
+    The recording is not "vibes" — the transcript, its hostility score and
+    whether the audio actually covers the trip window are all computed facts a
+    reviewer can replay.
+    """
+    for att in case.media_attachments:
+        if att.media_type != "audio" or att.transcript is None:
+            continue
+        tr = att.transcript
+        packet.facts.append(
+            Fact(
+                key=f"audio_{att.attachment_id}_duration_s",
+                label="Recording duration (ASR)",
+                value=round(tr.duration_s, 1),
+                unit="s",
+                source="trtc_asr",
+                supports="neutral",
+                note=f"{tr.engine} engine · {len(tr.segments)} speaker turn(s)",
+            )
+        )
+        packet.facts.append(
+            Fact(
+                key=f"audio_{att.attachment_id}_hostility",
+                label="Verbal hostility score (ASR transcript)",
+                value=round(tr.hostility_score, 2),
+                source="trtc_asr",
+                supports="rider" if tr.hostility_score >= 0.45 else "neutral",
+                note=tr.summary,
+            )
+        )
+        packet.facts.append(
+            Fact(
+                key=f"audio_{att.attachment_id}_threat",
+                label="Explicit threat detected in recording",
+                value=bool(tr.threat_detected),
+                source="trtc_asr",
+                supports="rider" if tr.threat_detected else "driver",
+                note=(", ".join(tr.keywords) if tr.keywords else "no threat language matched"),
+            )
+        )
+
+        trip = case.trip_data
+        window_ok = (
+            att.captured_at is not None
+            and trip.trip_start_time is not None
+            and (trip.trip_end_time or trip.cancellation_time) is not None
+            and trip.trip_start_time
+            <= att.captured_at
+            <= (trip.trip_end_time or trip.cancellation_time)
+        )
+        packet.facts.append(
+            Fact(
+                key=f"audio_{att.attachment_id}_in_trip_window",
+                label="Recording falls inside the trip window",
+                value=bool(window_ok),
+                source="trtc_asr",
+                supports="rider" if window_ok else "driver",
+                note=(
+                    "Recorded while the trip was in progress"
+                    if window_ok
+                    else "Recording timestamp falls outside the trip window"
+                ),
+            )
+        )
+
+        if tr.threat_detected or tr.hostility_score >= 0.45:
+            packet.policy_checks.append(
+                PolicyCheck(
+                    ref="SAFETY-2",
+                    description="Verified recordings containing threats or abuse require human review",
+                    expected="Escalated to Safety & Fraud, no autonomous ruling",
+                    actual=(
+                        f"hostility {tr.hostility_score:.2f}"
+                        + (", explicit threat" if tr.threat_detected else "")
+                    ),
+                    compliant=False,
+                    supports="neutral",
+                )
+            )
+            packet.risk_signals.append(
+                RiskSignal(
+                    party="driver" if att.uploaded_by == "rider" else "rider",
+                    signal="abusive_or_threatening_language",
+                    severity="high" if tr.threat_detected else "medium",
+                    detail=tr.summary,
+                )
+            )
+
+
+def _analyse_video_evidence(case: DisputeCase, packet: EvidencePacket) -> None:
+    """Turn extracted keyframes into auditable facts (Phase 3)."""
+    for att in case.media_attachments:
+        if att.media_type != "video" or att.video is None:
+            continue
+        vid = att.video
+        packet.facts.append(
+            Fact(
+                key=f"video_{att.attachment_id}_duration_s",
+                label="Video duration",
+                value=round(vid.duration_s, 1),
+                unit="s",
+                source="video_ingest",
+                supports="neutral",
+                note=f"{vid.width}x{vid.height} @ {vid.fps} fps"
+                if vid.width and vid.fps
+                else None,
+            )
+        )
+        packet.facts.append(
+            Fact(
+                key=f"video_{att.attachment_id}_frames",
+                label="Keyframes extracted for visual analysis",
+                value=vid.frames_extracted,
+                unit="frames",
+                source="video_ingest",
+                supports="neutral",
+                note=f"{vid.engine} backend · 1 frame/s sampling",
+            )
+        )
+        delta = minutes_between(
+            case.trip_data.trip_end_time or case.trip_data.cancellation_time, att.captured_at
+        )
+        if delta is not None:
+            packet.facts.append(
+                Fact(
+                    key=f"video_{att.attachment_id}_exif_delta_min",
+                    label="Video timestamp vs. trip end",
+                    value=round(delta, 1),
+                    unit="min",
+                    source="media_exif",
+                    supports="driver" if abs(delta) <= EXIF_TOLERANCE_MIN else "rider",
+                    note="Consistent with the trip window"
+                    if abs(delta) <= EXIF_TOLERANCE_MIN
+                    else "Recorded well after the trip ended",
+                )
+            )
+        for anomaly in vid.anomalies:
+            packet.risk_signals.append(
+                RiskSignal(
+                    party="driver" if att.uploaded_by == "driver" else "rider",
+                    signal="video_integrity_anomaly",
+                    severity="medium",
+                    detail=anomaly,
+                )
+            )
+
+
 def extract_evidence(case: DisputeCase) -> EvidencePacket:
     """Build the auditable evidence packet for a dispute dossier."""
     packet = EvidencePacket(
@@ -873,6 +1022,8 @@ def extract_evidence(case: DisputeCase) -> EvidencePacket:
     else:
         _analyse_no_show(case, packet)
 
+    _analyse_audio_evidence(case, packet)
+    _analyse_video_evidence(case, packet)
     _analyse_risk(case, packet)
     packet.summary = _summarise(case, packet)
     return packet

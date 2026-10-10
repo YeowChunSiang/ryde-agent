@@ -2,6 +2,7 @@ import type {
   CaseSummary,
   DisputeAccepted,
   Health,
+  MediaUploadResult,
   OverrideAccepted,
   OverrideRequest,
   PrecedentLibrary,
@@ -70,6 +71,35 @@ export async function submitOverride(
 
 export async function fetchPrecedents(): Promise<PrecedentLibrary> {
   return getJSON<PrecedentLibrary>("/precedents");
+}
+
+/**
+ * Phase 3: attach a multi-modal payload to a case *before* arbitration runs.
+ * The backend parks it in the media store and grafts it onto the dossier when
+ * `POST /dispute` loads the case, so the next run arbitrates the real file.
+ */
+export async function uploadMedia(
+  kind: "audio" | "video",
+  caseId: string,
+  file: File,
+  capturedAt?: string,
+): Promise<MediaUploadResult> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("case_id", caseId);
+  if (capturedAt) form.append("captured_at", capturedAt);
+
+  const res = await fetch(`${BASE}/upload-${kind}`, { method: "POST", body: form });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Upload failed: ${res.status} ${res.statusText} ${detail}`);
+  }
+  return (await res.json()) as MediaUploadResult;
+}
+
+/** Count of payloads currently parked in the backend media store. */
+export async function fetchUploads(): Promise<Record<string, unknown[]>> {
+  return getJSON<Record<string, unknown[]>>("/media/uploads");
 }
 
 /**

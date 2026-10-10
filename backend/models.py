@@ -111,6 +111,7 @@ class AgentRole(str, Enum):
     EVIDENCE = "evidence"
     FRAUD = "fraud"
     POLICY = "policy"
+    ASR = "asr"
     VISION = "vision"
     RIDER_ADVOCATE = "rider_advocate"
     DRIVER_ADVOCATE = "driver_advocate"
@@ -273,11 +274,72 @@ class CancellationPolicy(_Domain):
     fee_goes_to: str = "driver_compensation"
 
 
+class AudioSegment(_Strict):
+    """One speaker turn returned by the TRTC ASR pipeline."""
+
+    speaker: Literal["rider", "driver", "unknown"] = "unknown"
+    start_s: float = Field(default=0.0, ge=0)
+    end_s: float = Field(default=0.0, ge=0)
+    text: str = ""
+    hostility: float = Field(default=0.0, ge=0, le=1)
+
+
+class AudioTranscript(_Strict):
+    """Structured output of `trtc_client.py` for one audio attachment."""
+
+    attachment_id: str
+    #: Web path of the source clip, so the UI can play it back next to the text.
+    source_url: Optional[str] = None
+    engine: Literal["trtc", "simulated"] = "simulated"
+    language: str = "en-SG"
+    duration_s: float = Field(default=0.0, ge=0)
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    segments: list[AudioSegment] = Field(default_factory=list)
+    full_text: str = ""
+    hostility_score: float = Field(default=0.0, ge=0, le=1)
+    threat_detected: bool = False
+    keywords: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+
+class VideoFrame(_Strict):
+    """A keyframe extracted from an ingested video clip."""
+
+    index: int
+    timestamp_s: float = Field(default=0.0, ge=0)
+    path: str
+    width: Optional[int] = None
+    height: Optional[int] = None
+    mean_luminance: Optional[float] = None
+    motion_score: Optional[float] = None
+    label: Optional[str] = None
+
+
+class VideoAnalysis(_Strict):
+    """Structured output of `vision_utils.py` + the vision model for a video."""
+
+    attachment_id: str
+    #: Web path of the source clip, so the UI can play it back next to the frames.
+    source_url: Optional[str] = None
+    duration_s: float = Field(default=0.0, ge=0)
+    fps: Optional[float] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    frames_extracted: int = 0
+    frames: list[VideoFrame] = Field(default_factory=list)
+    anomalies: list[str] = Field(default_factory=list)
+    severity: Literal["none", "normal_wear", "minor_mess", "liquid_spill", "major_damage"] = (
+        "none"
+    )
+    reasoning: str = ""
+    engine: Literal["ffmpeg", "opencv", "unavailable"] = "ffmpeg"
+
+
 class MediaAttachment(_Domain):
-    """Vision pipeline payload (Image Analysis Agent — stretch goal)."""
+    """Vision / audio pipeline payload (Image Analysis Agent — stretch goal)."""
 
     attachment_id: str = Field(default_factory=lambda: _new_id("media"))
-    media_type: Literal["image", "video"] = "image"
+    media_type: Literal["image", "video", "audio"] = "image"
     url: str
     uploaded_by: Literal["rider", "driver"] = "driver"
     # EXIF / provenance signals used for forensic checks
@@ -288,6 +350,24 @@ class MediaAttachment(_Domain):
     exif_present: bool = True
     ai_generated_probability: Optional[float] = Field(default=None, ge=0, le=1)
     caption: Optional[str] = None
+
+    # --- Phase 3: multi-modal ingestion ------------------------------------
+    duration_s: Optional[float] = Field(
+        default=None, description="Runtime of an audio/video payload in seconds"
+    )
+    local_path: Optional[str] = Field(
+        default=None,
+        description="Filesystem path of an uploaded payload (relative to the media dir)",
+    )
+    asset_key: Optional[str] = Field(
+        default=None, description="Key into the Miora mock-asset manifest served by the UI"
+    )
+    transcript: Optional[AudioTranscript] = Field(
+        default=None, description="Populated by the TRTC ASR pipeline for audio payloads"
+    )
+    video: Optional[VideoAnalysis] = Field(
+        default=None, description="Populated by the video ingestion pipeline"
+    )
 
 
 class DisputeCase(_Domain):
@@ -517,7 +597,7 @@ class OverrideAccepted(_Strict):
 
 
 class VisionFinding(_Strict):
-    """Output of the Image Analysis Agent."""
+    """Output of the Image Analysis Agent (images, videos and audio transcripts)."""
 
     attachment_id: str
     genuine: bool
@@ -527,6 +607,11 @@ class VisionFinding(_Strict):
     severity: Literal["none", "normal_wear", "minor_mess", "liquid_spill", "major_damage"] = "none"
     anomalies: list[str] = Field(default_factory=list)
     reasoning: str = ""
+
+    # --- Phase 3: multi-modal ----------------------------------------------
+    media_kind: Literal["image", "video", "audio"] = "image"
+    video: Optional[VideoAnalysis] = None
+    transcript: Optional[AudioTranscript] = None
 
 
 class AdvocateArgument(_Strict):
@@ -641,3 +726,5 @@ class CaseSummary(_Strict):
     expected_ruling: str
     filed_by: str
     multimodal: bool
+    #: Miora-generated mock evidence rendered by the UI (Phase 3)
+    evidence_assets: list[str] = Field(default_factory=list)

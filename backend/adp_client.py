@@ -523,6 +523,12 @@ class OfflineReasoner:
     async def run_vision(
         self, case: DisputeCase, packet: EvidencePacket, attachment: Any
     ) -> VisionFinding:
+        # Phase 3: the same agent now arbitrates three modalities.
+        if getattr(attachment, "media_type", "image") == "audio":
+            return self._vision_audio(case, attachment)
+        if getattr(attachment, "media_type", "image") == "video":
+            return self._vision_video(case, attachment)
+
         trip_end = case.trip_data.trip_end_time or case.trip_data.cancellation_time
         delta: Optional[float] = None
         if trip_end and attachment.captured_at:
@@ -582,6 +588,128 @@ class OfflineReasoner:
             severity=severity,
             anomalies=anomalies,
             reasoning=reasoning,
+        )
+
+    def _vision_video(self, case: DisputeCase, attachment: Any) -> VisionFinding:
+        """Adjudicate a video payload from its extracted keyframes."""
+        analysis = getattr(attachment, "video", None)
+        trip_end = case.trip_data.trip_end_time or case.trip_data.cancellation_time
+        delta: Optional[float] = None
+        if trip_end and attachment.captured_at:
+            delta = round((attachment.captured_at - trip_end).total_seconds() / 60.0, 1)
+
+        anomalies: list[str] = []
+        ai_prob = attachment.ai_generated_probability
+        frames = analysis.frames_extracted if analysis else 0
+
+        if not analysis or frames == 0:
+            anomalies.append("No keyframes could be decoded — clip is not analysable")
+        if delta is not None and abs(delta) > 45:
+            anomalies.append(
+                f"Clip timestamp is {abs(delta):.0f} min from trip end — outside the 45 min window"
+            )
+        if ai_prob is not None and ai_prob >= 0.50:
+            anomalies.append(
+                f"AI-generation probability {ai_prob:.2f} exceeds the 0.50 admissibility threshold"
+            )
+        anomalies.extend(analysis.anomalies if analysis else [])
+
+        caption = (attachment.caption or "").lower()
+        if any(k in caption for k in ("spill", "drink", "liquid", "bubble tea", "coffee", "mess")):
+            severity = "liquid_spill"
+        elif any(k in caption for k in ("damage", "torn", "broken", "vomit")):
+            severity = "major_damage"
+        else:
+            severity = "minor_mess"
+
+        genuine = frames > 0 and (delta is None or abs(delta) <= 45) and not (
+            ai_prob is not None and ai_prob >= 0.50
+        )
+        if not genuine:
+            anomalies.append("Video marked inadmissible — excluded from the ruling")
+
+        reasoning = (
+            f"{frames} keyframe(s) sampled across {analysis.duration_s:.1f}s of footage; "
+            "timestamps align with the trip window and the frames passed the synthetic-media "
+            "screen, so the sequence is admissible."
+            if genuine and analysis
+            else "The clip fails forensic validation: " + "; ".join(anomalies[:2]) + "."
+        )
+        # Keep the embedded VideoAnalysis in sync with the agent's verdict so the
+        # frontend and the judge read the same severity from one place.
+        if analysis is not None:
+            analysis = analysis.model_copy(
+                update={
+                    "severity": severity if genuine else "none",
+                    "reasoning": reasoning,
+                }
+            )
+        return VisionFinding(
+            attachment_id=attachment.attachment_id,
+            genuine=genuine,
+            authenticity_confidence=0.88 if genuine else 0.84,
+            ai_generated_probability=ai_prob,
+            exif_timestamp_delta_min=delta,
+            severity=severity if genuine else "none",
+            anomalies=anomalies,
+            reasoning=reasoning,
+            media_kind="video",
+            video=analysis,
+        )
+
+    def _vision_audio(self, case: DisputeCase, attachment: Any) -> VisionFinding:
+        """Adjudicate an audio payload from its ASR transcript."""
+        transcript = getattr(attachment, "transcript", None)
+        trip_start = case.trip_data.trip_start_time
+        trip_end = case.trip_data.trip_end_time or case.trip_data.cancellation_time
+        delta: Optional[float] = None
+        if trip_end and attachment.captured_at:
+            delta = round((attachment.captured_at - trip_end).total_seconds() / 60.0, 1)
+
+        in_window = bool(
+            attachment.captured_at
+            and trip_start
+            and trip_end
+            and trip_start <= attachment.captured_at <= trip_end
+        )
+        anomalies: list[str] = []
+        if transcript is None:
+            anomalies.append("No transcript could be produced — audio is unusable as evidence")
+        if not in_window:
+            anomalies.append("Recording timestamp falls outside the trip window")
+
+        genuine = transcript is not None and in_window
+        if transcript is not None and transcript.threat_detected:
+            anomalies.append("Explicit threat detected in the transcript")
+        elif transcript is not None and transcript.hostility_score >= 0.45:
+            anomalies.append(
+                f"Abusive language detected (hostility {transcript.hostility_score:.2f})"
+            )
+
+        reasoning = (
+            f"TRTC ASR produced a {len(transcript.segments)}-turn transcript "
+            f"(engine: {transcript.engine}, hostility {transcript.hostility_score:.2f}). "
+            + transcript.summary
+            + (
+                " Recording is inside the trip window, so it is admissible and must be "
+                "reviewed by a human under policy SAFETY-2."
+                if in_window
+                else " Recording falls outside the trip window — provenance unverified."
+            )
+            if transcript
+            else "Audio could not be transcribed."
+        )
+        return VisionFinding(
+            attachment_id=attachment.attachment_id,
+            genuine=genuine,
+            authenticity_confidence=0.8 if genuine else 0.6,
+            ai_generated_probability=attachment.ai_generated_probability,
+            exif_timestamp_delta_min=delta,
+            severity="none",
+            anomalies=anomalies,
+            reasoning=reasoning,
+            media_kind="audio",
+            transcript=transcript,
         )
 
     async def run_advocate(
@@ -687,7 +815,7 @@ class OfflineReasoner:
         elif dtype == "property_damage":
             ruling = _judge_property_damage(case, packet, vision)
         elif dtype == "safety_incident":
-            ruling = _judge_safety_incident(case, packet)
+            ruling = _judge_safety_incident(case, packet, vision)
         else:
             ruling = _judge_generic(case, packet)
 
@@ -953,6 +1081,13 @@ def _judge_route_deviation(case: DisputeCase, packet: EvidencePacket) -> Ruling:
     )
 
 
+def _fps_label(analysis: VideoAnalysis) -> str:
+    """Human-readable sampling rate of an extracted keyframe set."""
+    if not analysis.fps:
+        return "1 fps"
+    return f"{analysis.fps:g} fps source, 1 fps sampling"
+
+
 def _judge_property_damage(
     case: DisputeCase, packet: EvidencePacket, vision: Sequence[VisionFinding]
 ) -> Ruling:
@@ -963,14 +1098,44 @@ def _judge_property_damage(
     severity_ok = any(v.severity in {"liquid_spill", "major_damage"} for v in admissible)
     severity_mid = any(v.severity == "minor_mess" for v in admissible)
 
+    def _noun(v: VisionFinding) -> str:
+        return {"video": "clip", "audio": "recording"}.get(v.media_kind, "photo")
+
+    # Phase 3: describe what the vision agent actually looked at.
+    extra: list[str] = []
+    for v in admissible:
+        if v.media_kind == "video" and v.video:
+            extra.append(
+                f"Video {v.attachment_id}: {v.video.frames_extracted} keyframe(s) sampled at "
+                f"{_fps_label(v.video)} from {v.video.duration_s:.1f}s of footage; "
+                f"cabin condition classified '{v.video.severity}'."
+            )
+            if v.exif_timestamp_delta_min is not None:
+                extra.append(
+                    f"Clip metadata timestamp sits {v.exif_timestamp_delta_min:.0f} min from "
+                    "trip end, inside the 45 min evidentiary window."
+                )
+            for a in v.video.anomalies[:2]:
+                extra.append(f"Integrity flag on {v.attachment_id}: {a}")
+        elif v.media_kind == "image":
+            extra.append(f"Photo {v.attachment_id} classified '{v.severity}' by the vision agent.")
+
     findings = [
         f"Cleaning fee claimed: S${fee_claim:.2f}.",
-        f"{len(admissible)} of {len(vision)} submitted photo(s) passed forensic validation."
+        (
+            f"{len(admissible)} of {len(vision)} submitted "
+            + (
+                "video clip(s)"
+                if any(v.media_kind == "video" for v in vision)
+                else "photo(s)"
+            )
+            + " passed forensic validation."
+        )
         if vision
-        else "No photo evidence was submitted with the claim.",
-    ]
+        else "No photo or video evidence was submitted with the claim.",
+    ] + extra
     for v in rejected:
-        findings.extend(f"Rejected photo {v.attachment_id}: {a}" for a in v.anomalies[:2])
+        findings.extend(f"Rejected {_noun(v)} {v.attachment_id}: {a}" for a in v.anomalies[:2])
 
     policy_applied = [c.ref for c in packet.policy_checks]
 
@@ -978,11 +1143,31 @@ def _judge_property_damage(
         decision = Decision.COMPENSATE_DRIVER
         amount = round(min(fee_claim, 80.0), 2)
         confidence = 0.82
+        lead = admissible[0]
+        visual_clause = (
+            (
+                f"The {lead.video.duration_s:.1f}s clip was decomposed into "
+                f"{lead.video.frames_extracted} keyframes and the vision agent read across them a "
+                f"cabin condition of '{lead.video.severity}'"
+                + (
+                    f", with no integrity anomalies across the sequence"
+                    if not lead.video.anomalies
+                    else f", flagging {len(lead.video.anomalies)} integrity note(s)"
+                )
+                + "."
+            )
+            if lead.media_kind == "video" and lead.video
+            else (
+                "The submitted photo passed forensic validation — its EXIF timestamp sits within "
+                "the trip window and it cleared the synthetic-media screen — and the vision agent "
+                f"classified the cabin condition as '{lead.severity}'."
+            )
+        )
         reasoning = (
-            "The submitted photo passed forensic validation — its EXIF timestamp sits within the "
-            f"trip window and it cleared the synthetic-media screen — and the vision agent classified "
-            f"the cabin condition as '{admissible[0].severity}'. The cleaning claim is therefore "
-            f"supported by admissible evidence and S${amount:.2f} is awarded to the driver."
+            visual_clause
+            + " Its metadata timestamp sits within the trip window and it cleared the "
+            "synthetic-media screen. The cleaning claim is therefore supported by admissible "
+            f"evidence and S${amount:.2f} is awarded to the driver."
         )
         rider_summary = (
             f"The cleaning evidence was verified, so S${amount:.2f} has been charged to your account."
@@ -1048,12 +1233,14 @@ def _judge_property_damage(
     )
 
 
-def _judge_safety_incident(case: DisputeCase, packet: EvidencePacket) -> Ruling:
+def _judge_safety_incident(
+    case: DisputeCase, packet: EvidencePacket, vision: Sequence[VisionFinding]
+) -> Ruling:
     """Safety allegations are outside the system's autonomy boundary by design.
 
     The judge still does useful work — corroborating the allegation against the
-    telematics so the human investigator opens with the facts — but it never
-    issues a monetary ruling on its own.
+    telematics *and* the TRTC transcript so the human investigator opens with
+    the facts — but it never issues a monetary ruling on its own.
     """
     braking = sum(1 for e in case.app_events if e.event_type == "harsh_braking_detected")
     speeding = sum(1 for e in case.app_events if e.event_type == "speed_limit_exceeded")
@@ -1067,7 +1254,38 @@ def _judge_safety_incident(case: DisputeCase, packet: EvidencePacket) -> Ruling:
         f"{len(case.chat_logs)} chat message(s) on record between the parties.",
     ]
 
-    corroborated = braking > 0 or speeding > 0
+    # --- Phase 3: TRTC ASR transcript -----------------------------------
+    audio = [v for v in vision if v.media_kind == "audio" and v.transcript]
+    transcript_clause = ""
+    threat_clause = ""
+    for v in audio:
+        tr = v.transcript
+        assert tr is not None
+        findings.append(
+            f"TRTC ASR ({tr.engine}) transcribed {tr.duration_s:.0f}s of in-trip audio across "
+            f"{len(tr.segments)} speaker turn(s); hostility score {tr.hostility_score:.2f}."
+        )
+        transcript_clause = (
+            f" The TRTC ASR pipeline transcribed {tr.duration_s:.0f}s of in-trip audio "
+            f"({tr.engine} engine, {len(tr.segments)} speaker turns) and scored it "
+            f"{tr.hostility_score:.2f} on the hostility scale."
+        )
+        if tr.threat_detected:
+            findings.append(
+                "Transcript contains an explicit threat — matched phrase(s): "
+                + ", ".join(f"'{k}'" for k in tr.keywords[:3])
+                + "."
+            )
+            threat_clause = (
+                " The transcript contains an explicit threat ("
+                + ", ".join(f"'{k}'" for k in tr.keywords[:3])
+                + "), which is a mandatory human-review trigger independent of the telematics."
+            )
+
+    corroborated = braking > 0 or speeding > 0 or any(
+        (v.transcript and (v.transcript.threat_detected or v.transcript.hostility_score >= 0.45))
+        for v in audio
+    )
     confidence = 0.55 if corroborated else 0.45
 
     return Ruling(
@@ -1087,12 +1305,15 @@ def _judge_safety_incident(case: DisputeCase, packet: EvidencePacket) -> Ruling:
             + f"{braking} harsh-braking event(s)"
             + (f", {speeding} speed-limit breach(es)" if speeding else "")
             + (f" and a peak of {peak:.0f} km/h" if peak else "")
-            + ". Establishing intent, driver fitness to remain on the platform and any liability "
+            + "."
+            + transcript_clause
+            + threat_clause
+            + " Establishing intent, driver fitness to remain on the platform and any liability "
             "requires a human investigator, so no monetary ruling is issued and the case is "
             "handed over in full under policy SAFETY-1."
         ),
         key_findings=findings,
-        policy_applied=["SAFETY-1"],
+        policy_applied=["SAFETY-1", "SAFETY-2"] if audio else ["SAFETY-1"],
         rider_summary=(
             "Your safety report has been escalated to a human investigator and is being treated "
             "with priority. No charge has been changed in the meantime."

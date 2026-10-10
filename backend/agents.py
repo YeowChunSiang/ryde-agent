@@ -313,6 +313,24 @@ class FraudDetectionAgent:
         verdict = self._verdict(risk_score)
         action = self._recommended_action(case, verdict, filer)
 
+        # Phase 3: a threat or sustained abuse surfaced by the ASR pipeline is a
+        # safety matter, not a bad-faith-claim matter — it outranks the numeric
+        # verdict, which only measures dispute abuse.
+        if packet:
+            safety = [
+                s
+                for s in packet.risk_signals
+                if s.signal == "abusive_or_threatening_language"
+            ]
+            if safety:
+                worst = safety[0]
+                signals.extend(safety)
+                action = (
+                    f"Refer to the Safety & Fraud team before any resolution: the TRTC "
+                    f"transcript carries a {worst.severity}-severity "
+                    f"'abusive_or_threatening_language' finding against the {worst.party}."
+                )
+
         return FraudAssessment(
             dispute_id=case.dispute_id,
             risk_score=risk_score,

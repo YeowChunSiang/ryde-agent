@@ -175,6 +175,23 @@ curl -s -X POST http://localhost:3000/api/override/<run_id> \
 # 6. Inspect the knowledge base and the escalation queue
 curl -s http://localhost:3000/api/precedents | jq
 curl -s http://localhost:3000/api/escalations | jq
+
+# 7. Attach a covert audio recording to a safety case (TRTC ASR runs on it)
+curl -s -X POST http://localhost:3000/api/upload-audio \
+  -F "case_id=DISP-006" \
+  -F "captured_at=2026-09-18T23:41:00+08:00" \
+  -F "transcript_hint=driver: I will find you after this trip, I know where you live!" \
+  -F "file=@backend/data/uploads/samples/disp006_argument.wav" | jq
+
+# 8. Attach a dashcam clip — ffmpeg extracts keyframes at 1 fps automatically
+curl -s -X POST http://localhost:3000/api/upload-video \
+  -F "case_id=DISP-007" \
+  -F "captured_at=2026-09-20T21:36:00+08:00" \
+  -F "file=@backend/data/uploads/samples/disp007_cabin.mp4" | jq
+
+# 9. Re-run the safety case — the new transcript now flows into the ruling
+curl -s -X POST http://localhost:3000/api/resolve -H "Content-Type: application/json" \
+  -d '{"case_id":"DISP-006"}' | jq '.ruling | {decision, escalated, key_findings}'
 ```
 
 ## Why an "evidence-first" design?
@@ -211,6 +228,8 @@ credentials — and so it can be A/B-tested against a baseline ruling
 | `DISP-003` | Property Damage | high     | **NO ACTION** + escalated to Fraud & Safety (fake photo) |
 | `DISP-004` | Property Damage | high     | **COMPENSATE DRIVER** — $60 cleaning fee awarded      |
 | `DISP-005` | Safety Incident | critical | **ESCALATED TO HUMAN** — never auto-resolved          |
+| `DISP-006` | Safety Incident | critical | **ESCALATED TO HUMAN** — TRTC ASR threat detected     |
+| `DISP-007` | Property Damage | high     | **COMPENSATE DRIVER** — $60, keyframes corroborate spill |
 
 ## Stretch goals implemented
 
@@ -243,6 +262,67 @@ credentials — and so it can be A/B-tested against a baseline ruling
 All six agents emit events on the SSE stream, and the console renders them in
 the 9-stage pipeline rail and the **Risk & RAG** tab.
 
+## Phase 3: multi-modal evidence pipeline
+
+The dispatcher now accepts **secret audio recordings** and **dashcam / damage
+clips** as first-class evidence. Two new agents and three new backend modules
+power them:
+
+* **TRTC Speech-to-Text** (`trtc_client.py`) — Tencent Cloud TRTC ASR with
+  TC3-HMAC-SHA256 signing. Falls back to a deterministic simulated client when
+  credentials are absent (CI / demo). Scores each transcript 0–1 for
+  hostility, flags explicit threats (`"I know where you live"`,
+  `"break your phone"`, …) and segments the audio into timestamped
+  rider/driver turns.
+* **Keyframe Extraction** (`vision_utils.py`) — `ffmpeg` + `ffprobe` first,
+  OpenCV fallback. Samples 1 frame per second, computes per-frame luminance
+  and motion, and surfaces integrity anomalies (very dark clip, near-identical
+  frames → looped or frozen). Resulting `VideoAnalysis` carries frames,
+  duration, engine and `severity` back to the Vision Agent.
+* **`/upload-audio` & `/upload-video`** (FastAPI) — park uploaded payloads in
+  `data/uploads/...` and graft them onto the matching case dossier on the next
+  run, so the Judge, Fraud Agent and Advocates see the real file. Optional
+  `transcript_hint` is a deterministic knob for the simulated ASR.
+
+Two new sample cases exercise the new agents end-to-end:
+
+| Case | Type | Pipeline | Expected ruling |
+|------|------|----------|-----------------|
+| `DISP-006` | `safety_incident` | TRTC ASR transcribes a 42 s in-app safety recording into 5 turns; hostility 1.00, explicit threat flagged. | **ESCALATE TO HUMAN** (mandatory under policy `SAFETY-1/2`) |
+| `DISP-007` | `property_damage` | 6 s cabin video decoded into 6 keyframes; `EXIF Δ 2 min` inside the 45 min window; severity `liquid_spill`. | **COMPENSATE DRIVER — $60**, ruling cites the extracted keyframes |
+
+All eight agents now emit on the SSE stream and the console renders them in the
+**10-stage** pipeline rail (the new `Media Ingestion` stage sits between SLA
+routing and evidence extraction). The Evidence tab adds:
+
+* a real `<video controls>` player with the Miora poster image, the clip's
+  duration/source fps, frame count and engine, and a clickable 4-column
+  keyframe strip that enlarges on click;
+* a real `<audio controls>` player with per-turn transcript cards (speaker
+  chip, timestamps, hostility score, threat text highlighted red), keyword
+  chips and a one-line summary;
+* a "Submit your own payload" box that posts to `/upload-audio` and
+  `/upload-video`;
+* Miora-generated avatars for every agent role (13 PNGs under
+  `frontend/public/assets/miora/agents/`), including the new
+  `asr.png` for the TRTC stage.
+
+### Testing
+
+```bash
+# 25-test regression suite (ASR scoring, keyframe extraction, upload
+# endpoints, DISP-006/007 end-to-end, 7-case regression, Miora asset audit)
+cd /workspace && python3 -m pytest backend/tests -q
+
+# Headless Chromium smoke: video player renders, keyframes decode, audio
+# player renders, all Miora avatars load, no JS errors
+cd /workspace && python3 scripts/ui_smoke.py
+```
+
+`scripts/generate_mock_assets.py` produces the audio WAV, MP4 and the Miora
+asset PNGs deterministically (Pillow + ffmpeg), so the test suite and the UI
+work without any external network calls.
+
 ## Environment
 
 | Variable                         | Default | Purpose                                          |
@@ -260,6 +340,14 @@ the 9-stage pipeline rail and the **Risk & RAG** tab.
 | `PRECEDENT_TOP_K`                | `2`     | Precedents retrieved per dispute                 |
 | `PRECEDENT_STORE_PATH`           | (none)  | JSON file backing the knowledge base (persists across restarts) |
 | `PORT`                           | `3000`  | HTTP port                                        |
+| `TRTC_SECRET_ID` / `TRTC_SECRET_KEY` | (empty) | Live TRTC ASR; empty = simulated client       |
+| `TRTC_APP_ID`                    | (empty) | TRTC application id (optional)                  |
+| `TRTC_ASR_ENDPOINT`              | `https://asr.tencentcloud.com` | TRTC ASR endpoint             |
+| `TRTC_TIMEOUT_S`                 | `15`    | TRTC request timeout                             |
+| `MEDIA_DIR`                      | `data/uploads` | Where uploaded audio/video are parked    |
+| `FRAME_DIR`                      | `data/frames`   | Where extracted keyframes are written   |
+| `VIDEO_FRAME_FPS`                | `1.0`   | Keyframe sampling rate                           |
+| `VIDEO_MAX_FRAMES`               | `12`    | Cap on frames per clip (keeps the UI snappy)     |
 
 ## Submitting to the hackathon
 

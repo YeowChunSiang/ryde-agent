@@ -83,6 +83,35 @@ class Settings(BaseModel):
         description="JSON file backing the precedent knowledge base (survives restarts)",
     )
 
+    # --- Multi-modal ingestion (Phase 3) -----------------------------------
+    trtc_asr_endpoint: str = Field(
+        default="https://trtc.tencentcloudapi.com",
+        description="Tencent Cloud TRTC ASR endpoint used by trtc_client.py",
+    )
+    trtc_secret_id: str = Field(
+        default="", description="TRTC/ASR SecretId; empty = simulated transcription"
+    )
+    trtc_secret_key: str = Field(
+        default="", description="TRTC/ASR SecretKey; empty = simulated transcription"
+    )
+    trtc_app_id: str = Field(default="", description="TRTC SdkAppId for the ASR task")
+    trtc_timeout_s: float = Field(default=30.0)
+
+    media_dir: Path = Field(
+        default=Path("data/uploads"),
+        description="Where /upload-audio and /upload-video persist raw payloads",
+    )
+    frame_dir: Path = Field(
+        default=Path("data/frames"),
+        description="Where vision_utils.py writes extracted video keyframes",
+    )
+    video_frame_fps: float = Field(
+        default=1.0, description="Keyframes extracted per second of video evidence"
+    )
+    video_max_frames: int = Field(
+        default=12, description="Hard cap on keyframes analysed per video attachment"
+    )
+
     # --- Service -----------------------------------------------------------
     host: str = "0.0.0.0"
     port: int = 3000
@@ -135,6 +164,21 @@ def get_settings() -> Settings:
                 str(Path(__file__).resolve().parent / "data" / "precedents.json"),
             )
         ),
+        trtc_asr_endpoint=os.getenv(
+            "TRTC_ASR_ENDPOINT", "https://trtc.tencentcloudapi.com"
+        ),
+        trtc_secret_id=os.getenv("TRTC_SECRET_ID", "").strip(),
+        trtc_secret_key=os.getenv("TRTC_SECRET_KEY", "").strip(),
+        trtc_app_id=os.getenv("TRTC_APP_ID", "").strip(),
+        trtc_timeout_s=float(os.getenv("TRTC_TIMEOUT_S", "30")),
+        media_dir=Path(
+            os.getenv("MEDIA_DIR", str(Path(__file__).resolve().parent / "data" / "uploads"))
+        ),
+        frame_dir=Path(
+            os.getenv("FRAME_DIR", str(Path(__file__).resolve().parent / "data" / "frames"))
+        ),
+        video_frame_fps=float(os.getenv("VIDEO_FRAME_FPS", "1")),
+        video_max_frames=int(os.getenv("VIDEO_MAX_FRAMES", "12")),
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "3000")),
         log_level=os.getenv("LOG_LEVEL", "info"),

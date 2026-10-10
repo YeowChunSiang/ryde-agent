@@ -25,6 +25,7 @@ import asyncio
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Optional
 
 from adp_client import (
@@ -41,8 +42,11 @@ from agents import (
     SLARoutingManager,
     build_escalation_packet,
 )
+from trtc_client import SimulatedASRClient, build_asr_provider
+from vision_utils import VideoProcessingError, analyse_video
 from config import Settings
 from evidence import extract_evidence
+from media_store import MediaStore, resolve_media_path
 from models import (
     AdvocateArgument,
     AgentEvent,
@@ -53,6 +57,7 @@ from models import (
     EventLevel,
     EvidencePacket,
     FraudAssessment,
+    MediaAttachment,
     OverrideRequest,
     PrecedentBundle,
     ResolutionResult,
@@ -154,6 +159,11 @@ class Orchestrator:
         self.collector = EvidenceCollectionAgent(settings)
         self.fraud_agent = FraudDetectionAgent(settings)
         self.policy_agent = PolicyPrecedentAgent(settings)
+
+        # --- Phase 3: multi-modal ingestion --------------------------------
+        self.asr = build_asr_provider(settings)
+        self.media_store = MediaStore(settings)
+        self._backend_root = Path(__file__).resolve().parent
 
     @property
     def engine(self) -> str:
@@ -326,6 +336,9 @@ class Orchestrator:
             await run.emit(AgentRole.SLA_ROUTER, "sla_reason", reason)
         await self._pace()
 
+        # --- 2b. MULTI-MODAL INGESTION (audio ASR + video keyframes) --------
+        await self._prepare_media(run)
+
         # --- 3. PARALLEL: collection | evidence | fraud | precedent ----------
         await run.emit(
             AgentRole.ORCHESTRATOR,
@@ -436,11 +449,15 @@ class Orchestrator:
             )
             for attachment in case.media_attachments:
                 t_vision = time.perf_counter()
+                noun = {"image": "photo", "video": "clip", "audio": "recording"}.get(
+                    attachment.media_type, "attachment"
+                )
                 await run.emit(
                     AgentRole.VISION,
                     "vision_analysis",
-                    f"Image Analysis Agent is inspecting {attachment.attachment_id}: verifying "
-                    "authenticity and cross-referencing the EXIF timestamp against the trip window...",
+                    f"Image Analysis Agent is inspecting {attachment.attachment_id} ({noun}): "
+                    "verifying authenticity and cross-referencing the capture timestamp "
+                    "against the trip window...",
                 )
                 await self._pace()
                 finding = await self._guarded(
@@ -454,7 +471,7 @@ class Orchestrator:
                     AgentRole.VISION,
                     "vision_finding",
                     (
-                        f"Image Analysis: photo is {'GENUINE' if finding.genuine else 'NOT ADMISSIBLE'} "
+                        f"Image Analysis: {noun} is {'GENUINE' if finding.genuine else 'NOT ADMISSIBLE'} "
                         f"(severity '{finding.severity}', AI-probability "
                         f"{finding.ai_generated_probability}, EXIF delta "
                         f"{finding.exif_timestamp_delta_min} min)."
@@ -725,6 +742,136 @@ class Orchestrator:
     # ------------------------------------------------------------------
     # Resilience: ADP failure -> deterministic reasoner
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Phase 3: multi-modal ingestion
+    # ------------------------------------------------------------------
+
+    async def _prepare_media(self, run: Run) -> None:
+        """Transcribe audio and decode video before facts are computed.
+
+        Runs *before* evidence extraction so the ASR transcript and the
+        extracted keyframes become first-class facts the advocates, the fraud
+        agent and the judge can cite — exactly like the GPS and chat logs.
+        """
+        case = run.case
+        for attachment in case.media_attachments:
+            if attachment.media_type == "audio":
+                await self._transcribe_audio(run, attachment)
+            elif attachment.media_type == "video":
+                await self._ingest_video(run, attachment)
+
+    async def _transcribe_audio(self, run: Run, attachment: MediaAttachment) -> None:
+        if attachment.transcript is not None:
+            return
+        t0 = time.perf_counter()
+        await run.emit(
+            AgentRole.ASR,
+            "audio_transcription",
+            f"TRTC ASR is transcribing {attachment.attachment_id} "
+            f"({attachment.duration_s or 0:.0f}s of in-cabin audio)...",
+        )
+        await self._pace()
+        try:
+            transcript = await self.asr.transcribe(attachment)
+        except Exception as exc:  # live ASR failed -> deterministic fallback
+            await run.emit(
+                AgentRole.ASR,
+                "audio_transcription",
+                f"TRTC ASR unavailable ({type(exc).__name__}: {exc}); using the deterministic "
+                "simulated transcription so the run still completes.",
+                level=EventLevel.WARNING,
+            )
+            transcript = await SimulatedASRClient(self.settings).transcribe(attachment)
+        attachment.transcript = transcript
+        if not transcript.source_url:
+            transcript.source_url = attachment.url or (
+                self.media_store.web_path(Path(attachment.local_path))
+                if attachment.local_path
+                else None
+            )
+        level = EventLevel.WARNING if transcript.threat_detected else EventLevel.EVIDENCE
+        await run.emit(
+            AgentRole.ASR,
+            "audio_transcript",
+            f"Transcript ({len(transcript.segments)} turn(s), {transcript.engine} engine): "
+            f"hostility {transcript.hostility_score:.2f}"
+            + (", EXPLICIT THREAT DETECTED" if transcript.threat_detected else ""),
+            level=level,
+            duration_ms=int((time.perf_counter() - t0) * 1000),
+            payload=transcript.model_dump(mode="json"),
+        )
+        for segment in transcript.segments:
+            await run.emit(
+                AgentRole.ASR,
+                "audio_turn",
+                f"[{segment.start_s:.1f}s-{segment.end_s:.1f}s] {segment.speaker}: "
+                f"{segment.text}",
+                level=EventLevel.WARNING if segment.hostility >= 0.45 else EventLevel.EVIDENCE,
+                payload={"speaker": segment.speaker, "hostility": segment.hostility},
+            )
+
+    async def _ingest_video(self, run: Run, attachment: MediaAttachment) -> None:
+        if attachment.video is not None:
+            return
+        t0 = time.perf_counter()
+        await run.emit(
+            AgentRole.VISION,
+            "video_ingest",
+            f"Video payload {attachment.attachment_id} detected — sampling keyframes "
+            f"at {self.settings.video_frame_fps:g} fps for visual analysis...",
+        )
+        await self._pace()
+        path = (
+            resolve_media_path(attachment.local_path, self.settings)
+            if attachment.local_path
+            else None
+        )
+        if path is None:
+            await run.emit(
+                AgentRole.VISION,
+                "video_ingest",
+                f"Video {attachment.attachment_id} has no decodable local payload — "
+                "falling back to metadata-only analysis.",
+                level=EventLevel.WARNING,
+            )
+            return
+        try:
+            analysis = await asyncio.to_thread(
+                analyse_video, path, self.settings, attachment.attachment_id
+            )
+        except VideoProcessingError as exc:
+            await run.emit(
+                AgentRole.VISION,
+                "video_ingest",
+                f"Keyframe extraction failed: {exc}",
+                level=EventLevel.WARNING,
+            )
+            return
+        attachment.video = analysis
+        attachment.duration_s = attachment.duration_s or analysis.duration_s
+        if not analysis.source_url:
+            analysis.source_url = attachment.url or self.media_store.web_path(
+                Path(attachment.local_path)
+            )
+        await run.emit(
+            AgentRole.VISION,
+            "video_frames",
+            f"Extracted {analysis.frames_extracted} keyframe(s) "
+            f"({analysis.duration_s:.1f}s clip"
+            + (f", {analysis.width}x{analysis.height}" if analysis.width else "")
+            + f", {analysis.engine} backend).",
+            level=EventLevel.EVIDENCE,
+            duration_ms=int((time.perf_counter() - t0) * 1000),
+            payload=analysis.model_dump(mode="json"),
+        )
+        for anomaly in analysis.anomalies:
+            await run.emit(
+                AgentRole.VISION,
+                "video_anomaly",
+                f"Video integrity flag — {anomaly}",
+                level=EventLevel.WARNING,
+            )
 
     async def _guarded(
         self,

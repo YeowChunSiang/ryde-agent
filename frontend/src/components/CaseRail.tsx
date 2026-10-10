@@ -13,12 +13,13 @@ interface Props {
 }
 
 export function CaseRail({ cases, selected, onSelect, disabled }: Props) {
+  const categories = new Set(cases.map((c) => c.dispute_type)).size;
   return (
     <nav className="flex h-full min-h-0 flex-col">
       <div className="border-b border-border px-4 py-3">
         <h2 className="text-sm font-semibold tracking-tight">Dispute Queue</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          {cases.length} sample dossiers · 3 categories
+          {cases.length} sample dossiers · {categories} categories
         </p>
       </div>
 

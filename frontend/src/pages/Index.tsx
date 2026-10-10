@@ -157,6 +157,24 @@ export default function Index() {
               KB: {library.length} precedents
             </Badge>
           )}
+          {health?.asr_engine && (
+            <Badge
+              variant="outline"
+              className="h-6 border-sky-500/30 bg-sky-500/10 font-mono text-[10px] text-sky-300"
+              title="TRTC speech-to-text backend"
+            >
+              ASR: {health.asr_engine}
+            </Badge>
+          )}
+          {health?.video_backend && (
+            <Badge
+              variant="outline"
+              className="h-6 border-violet-500/30 bg-violet-500/10 font-mono text-[10px] text-violet-300"
+              title="Keyframe extraction backend"
+            >
+              frames: {health.video_backend}
+            </Badge>
+          )}
           <Button onClick={run} disabled={!selected || streaming} size="sm" className="h-8">
             <Play className="h-3.5 w-3.5" />
             {streaming ? "Arbitrating…" : "Run Arbitration"}
@@ -241,6 +259,9 @@ export default function Index() {
                     <EvidencePanel
                       evidence={result?.evidence ?? null}
                       vision={result?.vision ?? []}
+                      caseId={selected}
+                      disabled={streaming}
+                      assets={activeCase?.evidence_assets ?? []}
                     />
                   </TabsContent>
                   <TabsContent value="risk" className="mt-0">
