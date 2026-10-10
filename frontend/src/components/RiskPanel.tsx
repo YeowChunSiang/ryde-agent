@@ -87,7 +87,10 @@ export function RiskPanel({ routing, collection, fraud, precedents, library }: P
             {routing.reasons.length > 0 && (
               <ul className="mt-2 space-y-0.5">
                 {routing.reasons.map((reason, i) => (
-                  <li key={i} className="text-xs leading-relaxed text-muted-foreground">
+                  <li
+                    key={i}
+                    className="whitespace-normal break-words text-xs leading-relaxed text-muted-foreground"
+                  >
                     • {reason}
                   </li>
                 ))}
@@ -102,7 +105,7 @@ export function RiskPanel({ routing, collection, fraud, precedents, library }: P
           <SectionTitle icon={<Database className="h-3.5 w-3.5" />}>
             External Data Collection
           </SectionTitle>
-          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          <p className="mt-2 whitespace-normal break-words text-xs leading-relaxed text-muted-foreground">
             {collection.summary}
           </p>
           <ul className="mt-2 space-y-1.5">
@@ -127,10 +130,14 @@ export function RiskPanel({ routing, collection, fraud, precedents, library }: P
                     {src.records} rec · {formatDuration(src.latency_ms)}
                   </span>
                 </div>
-                <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/70">
+                <p className="mt-0.5 whitespace-normal break-all font-mono text-[10px] leading-relaxed text-muted-foreground/70">
                   {src.endpoint}
                 </p>
-                {src.note && <p className="mt-0.5 text-xs text-muted-foreground">{src.note}</p>}
+                {src.note && (
+                  <p className="mt-1 whitespace-normal break-words text-xs leading-relaxed text-muted-foreground">
+                    {src.note}
+                  </p>
+                )}
               </li>
             ))}
           </ul>
@@ -173,8 +180,10 @@ export function RiskPanel({ routing, collection, fraud, precedents, library }: P
                 <p className="font-mono">{Math.round(fraud.driver_risk * 100)}%</p>
               </div>
             </div>
-            <p className="mt-2 text-sm leading-relaxed text-foreground/90">{fraud.reasoning}</p>
-            <p className="mt-1.5 text-xs text-muted-foreground">
+            <p className="mt-2 whitespace-normal break-words text-sm leading-relaxed text-foreground/90">
+              {fraud.reasoning}
+            </p>
+            <p className="mt-1.5 whitespace-normal break-words text-xs leading-relaxed text-muted-foreground">
               <span className="font-semibold">Action:</span> {fraud.recommended_action}
             </p>
             {fraud.policy_refs.length > 0 && (
@@ -225,7 +234,9 @@ export function RiskPanel({ routing, collection, fraud, precedents, library }: P
                       {signal.severity}
                     </Badge>
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{signal.detail}</p>
+                  <p className="mt-1 whitespace-normal break-words text-xs leading-relaxed text-muted-foreground">
+                    {signal.detail}
+                  </p>
                 </li>
               ))}
             </ul>
@@ -238,11 +249,11 @@ export function RiskPanel({ routing, collection, fraud, precedents, library }: P
           <SectionTitle icon={<BookOpen className="h-3.5 w-3.5" />}>
             Retrieved Precedents
           </SectionTitle>
-          <p className="mt-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+          <p className="mt-2 whitespace-normal break-words rounded-md border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
             {precedents.consistency_note}
           </p>
           {precedents.matches.length === 0 ? (
-            <p className="mt-2 text-xs text-muted-foreground">
+            <p className="mt-2 whitespace-normal break-words text-xs leading-relaxed text-muted-foreground">
               No analogous rulings in the knowledge base — the judge rules on policy alone.
             </p>
           ) : (
@@ -256,17 +267,17 @@ export function RiskPanel({ routing, collection, fraud, precedents, library }: P
                     <span className="font-mono text-[10px] text-muted-foreground">
                       {match.precedent.precedent_id}
                     </span>
-                    <span className="text-sm font-medium leading-snug">
+                    <span className="min-w-0 flex-1 whitespace-normal break-words text-sm font-medium leading-relaxed">
                       {match.precedent.title}
                     </span>
                     <span className="ml-auto font-mono text-xs text-indigo-300">
                       {Math.round(match.similarity * 100)}% match
                     </span>
                   </div>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  <p className="mt-1 whitespace-normal break-words text-xs leading-relaxed text-muted-foreground">
                     {match.precedent.summary}
                   </p>
-                  <p className="mt-1 text-xs">
+                  <p className="mt-1 whitespace-normal break-words text-xs leading-relaxed">
                     <span className="text-muted-foreground">Ruled: </span>
                     <span className="font-medium">{titleCase(match.precedent.ruling)}</span>
                     {match.precedent.amount > 0 && (
@@ -281,7 +292,7 @@ export function RiskPanel({ routing, collection, fraud, precedents, library }: P
                       </Badge>
                     )}
                   </p>
-                  <p className="mt-1 border-l-2 border-indigo-500/40 pl-2 text-xs italic text-muted-foreground">
+                  <p className="mt-1 whitespace-normal break-words border-l-2 border-indigo-500/40 pl-2 text-xs italic leading-relaxed text-muted-foreground">
                     {match.recommendation}
                   </p>
                   {match.matched_on.length > 0 && (
@@ -317,7 +328,7 @@ export function RiskPanel({ routing, collection, fraud, precedents, library }: P
                 <span className="font-mono text-[10px] text-muted-foreground">
                   {p.precedent_id}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-xs">{p.title}</span>
+                <span className="min-w-0 flex-1 whitespace-normal break-words text-xs leading-relaxed">{p.title}</span>
                 {p.source === "human_override" && (
                   <Badge
                     variant="outline"

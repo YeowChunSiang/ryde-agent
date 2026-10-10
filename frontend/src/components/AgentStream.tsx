@@ -116,24 +116,24 @@ export function AgentStream({ events, streaming }: Props) {
                   </span>
                 </div>
 
-                <p className="mt-1.5 text-sm leading-relaxed text-foreground/90">
+                <p className="mt-1.5 whitespace-normal break-words text-sm leading-relaxed text-foreground/90">
                   {event.message}
                 </p>
 
                 {typeof event.payload?.claim === "string" && (
-                  <p className="mt-1.5 border-l-2 border-border pl-2 text-xs italic leading-relaxed text-muted-foreground">
+                  <p className="mt-1.5 whitespace-normal break-words border-l-2 border-border pl-2 text-xs italic leading-relaxed text-muted-foreground">
                     {event.payload.claim}
                   </p>
                 )}
                 {typeof event.payload?.reasoning === "string" && (
-                  <p className="mt-1.5 border-l-2 border-border pl-2 text-xs italic leading-relaxed text-muted-foreground">
+                  <p className="mt-1.5 whitespace-normal break-words border-l-2 border-border pl-2 text-xs italic leading-relaxed text-muted-foreground">
                     {event.payload.reasoning}
                   </p>
                 )}
                 {typeof event.payload?.summary === "string" &&
                   typeof event.payload?.claim !== "string" &&
                   typeof event.payload?.reasoning !== "string" && (
-                    <p className="mt-1.5 border-l-2 border-border pl-2 text-xs italic text-muted-foreground">
+                    <p className="mt-1.5 whitespace-normal break-words border-l-2 border-border pl-2 text-xs italic leading-relaxed text-muted-foreground">
                       {event.payload.summary}
                     </p>
                   )}

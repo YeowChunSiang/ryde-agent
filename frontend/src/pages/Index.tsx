@@ -216,7 +216,9 @@ export default function Index() {
                     filed by {activeCase.filed_by}
                   </span>
                 </div>
-                <p className="mt-1 text-sm font-medium leading-snug">{activeCase.title}</p>
+                <p className="mt-1 whitespace-normal break-words text-sm font-medium leading-relaxed">
+                  {activeCase.title}
+                </p>
               </div>
             ) : (
               <p className="mb-3 text-sm text-muted-foreground">Loading dispute queue…</p>

@@ -62,7 +62,7 @@ export function EvidencePanel({ evidence, vision, caseId, disabled, assets }: Pr
   return (
     <div className="space-y-5">
       {evidence?.summary && (
-        <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+        <p className="whitespace-normal break-words rounded-md border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
           {evidence.summary}
         </p>
       )}
@@ -86,17 +86,19 @@ export function EvidencePanel({ evidence, vision, caseId, disabled, assets }: Pr
           <ul className="mt-2 space-y-1.5">
             {ordered.map((fact) => (
               <li key={fact.key} className="rounded-md border border-border bg-card/50 px-3 py-2">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium leading-snug">{fact.label}</p>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="whitespace-normal break-words text-sm font-medium leading-relaxed text-foreground">
+                      {fact.label}
+                    </p>
                     {fact.note && (
-                      <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                      <p className="mt-1 whitespace-normal break-words text-xs leading-relaxed text-muted-foreground">
                         {fact.note}
                       </p>
                     )}
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
-                    <span className="font-mono text-sm font-semibold text-foreground">
+                    <span className="whitespace-normal break-words text-right font-mono text-sm font-semibold text-foreground">
                       {String(fact.value)}
                       {fact.unit ? (
                         <span className="ml-0.5 text-xs text-muted-foreground">{fact.unit}</span>
@@ -110,7 +112,7 @@ export function EvidencePanel({ evidence, vision, caseId, disabled, assets }: Pr
                     </Badge>
                   </div>
                 </div>
-                <p className="mt-1 font-mono text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                <p className="mt-1 whitespace-normal break-words font-mono text-[10px] leading-relaxed text-muted-foreground/70">
                   {fact.source}
                 </p>
               </li>
@@ -138,14 +140,14 @@ export function EvidencePanel({ evidence, vision, caseId, disabled, assets }: Pr
                 ) : (
                   <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
                 )}
-                <div className="min-w-0">
-                  <p className="text-sm leading-snug">
+                <div className="min-w-0 flex-1">
+                  <p className="whitespace-normal break-words text-sm leading-relaxed">
                     <span className="font-mono text-[11px] text-muted-foreground">
                       [{check.ref}]
                     </span>{" "}
                     {check.description}
                   </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <p className="mt-1 whitespace-normal break-words text-xs leading-relaxed text-muted-foreground">
                     expected {check.expected} · observed {check.actual}
                   </p>
                 </div>
@@ -191,7 +193,9 @@ export function EvidencePanel({ evidence, vision, caseId, disabled, assets }: Pr
                     {signal.severity}
                   </Badge>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">{signal.detail}</p>
+                <p className="mt-1 whitespace-normal break-words text-xs leading-relaxed text-muted-foreground">
+                  {signal.detail}
+                </p>
               </li>
             ))}
           </ul>
@@ -243,13 +247,16 @@ export function EvidencePanel({ evidence, vision, caseId, disabled, assets }: Pr
                 {finding.anomalies.length > 0 && (
                   <ul className="mt-1.5 space-y-0.5">
                     {finding.anomalies.map((a, i) => (
-                      <li key={i} className="text-xs text-red-300/90">
+                      <li
+                        key={i}
+                        className="whitespace-normal break-words text-xs leading-relaxed text-red-300/90"
+                      >
                         • {a}
                       </li>
                     ))}
                   </ul>
                 )}
-                <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                <p className="mt-1.5 whitespace-normal break-words text-xs leading-relaxed text-muted-foreground">
                   {finding.reasoning}
                 </p>
               </li>
@@ -275,19 +282,22 @@ function mediaUrl(path: string | null | undefined): string | undefined {
 
 function AssetGallery({ assets }: { assets: string[] }) {
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {assets.map((src) => (
-        <figure key={src} className="overflow-hidden rounded-md border border-border bg-card/40">
+        <figure
+          key={src}
+          className="overflow-hidden rounded-lg border border-gray-700 bg-card/40"
+        >
           <img
             src={src}
             alt="Submitted evidence"
             loading="lazy"
-            className="h-28 w-full object-cover"
+            className="block w-full h-auto object-cover rounded-lg border border-gray-700"
             onError={(e) => {
               e.currentTarget.style.display = "none";
             }}
           />
-          <figcaption className="truncate px-2 py-1 font-mono text-[10px] text-muted-foreground">
+          <figcaption className="break-all whitespace-normal px-2 py-1 font-mono text-[10px] leading-relaxed text-muted-foreground">
             {src.split("/").pop()}
           </figcaption>
         </figure>
@@ -311,10 +321,10 @@ function MediaCard({ finding, poster }: { finding: VisionFinding; poster?: strin
     >
       <div className="flex flex-wrap items-center gap-2">
         <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <Badge variant="outline" className={cn("h-4 px-1 text-[10px]", meta.className)}>
+        <Badge variant="outline" className={cn("h-4 shrink-0 px-1 text-[10px]", meta.className)}>
           {meta.label}
         </Badge>
-        <span className="font-mono text-[11px] text-muted-foreground">
+        <span className="whitespace-normal break-all font-mono text-[11px] leading-relaxed text-muted-foreground">
           {finding.attachment_id}
         </span>
         <Badge
@@ -339,7 +349,7 @@ function MediaCard({ finding, poster }: { finding: VisionFinding; poster?: strin
           src={poster}
           alt="Submitted evidence"
           loading="lazy"
-          className="mt-2 max-h-40 w-full rounded border border-border object-cover"
+          className="mt-2 block w-full h-auto object-cover rounded-lg border border-gray-700"
           onError={(e) => {
             e.currentTarget.style.display = "none";
           }}
@@ -361,14 +371,13 @@ function VideoBlock({ analysis, poster }: { analysis: VideoAnalysis; poster?: st
           controls
           preload="metadata"
           poster={poster}
-          className="w-full rounded border border-border bg-black"
-          style={{ maxHeight: "13rem" }}
+          className="block w-full rounded-lg border border-gray-700 bg-black"
         >
           <source src={src} />
           Your browser cannot play this clip.
         </video>
       )}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] leading-relaxed text-muted-foreground">
         <span>{analysis.duration_s.toFixed(1)}s</span>
         {analysis.fps !== null && <span>{analysis.fps} fps source</span>}
         {analysis.width && analysis.height && (
@@ -381,7 +390,7 @@ function VideoBlock({ analysis, poster }: { analysis: VideoAnalysis; poster?: st
         <Badge
           variant="outline"
           className={cn(
-            "h-4 px-1 text-[10px]",
+            "h-4 shrink-0 px-1 text-[10px]",
             (SEVERITY_META[analysis.severity] ?? SEVERITY_META.none).className,
           )}
         >
@@ -394,7 +403,7 @@ function VideoBlock({ analysis, poster }: { analysis: VideoAnalysis; poster?: st
           <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
             Extracted keyframes — click to inspect
           </p>
-          <div className="grid grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
             {analysis.frames.map((frame) => (
               <button
                 key={frame.index}
@@ -412,7 +421,7 @@ function VideoBlock({ analysis, poster }: { analysis: VideoAnalysis; poster?: st
                   src={mediaUrl(frame.path)}
                   alt={`keyframe ${frame.index}`}
                   loading="lazy"
-                  className="h-14 w-full object-cover"
+                  className="block aspect-video w-full h-auto object-cover"
                   onError={(e) => {
                     e.currentTarget.style.display = "none";
                   }}
@@ -424,16 +433,16 @@ function VideoBlock({ analysis, poster }: { analysis: VideoAnalysis; poster?: st
             ))}
           </div>
           {active && (
-            <div className="mt-2 rounded border border-border bg-muted/40 px-2 py-1.5">
+            <div className="mt-2 rounded-md border border-border bg-muted/40 px-2 py-1.5">
               <img
                 src={mediaUrl(active.path)}
                 alt={`keyframe ${active.index} enlarged`}
-                className="max-h-40 w-full rounded object-contain"
+                className="block max-h-72 w-full rounded-lg border border-gray-700 object-contain"
                 onError={(e) => {
                   e.currentTarget.style.display = "none";
                 }}
               />
-              <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+              <p className="mt-1 whitespace-normal break-words font-mono text-[10px] leading-relaxed text-muted-foreground">
                 t={active.timestamp_s}s
                 {active.mean_luminance !== null && active.mean_luminance !== undefined && (
                   <> · luminance {active.mean_luminance.toFixed(2)}</>
@@ -451,7 +460,10 @@ function VideoBlock({ analysis, poster }: { analysis: VideoAnalysis; poster?: st
       {analysis.anomalies.length > 0 && (
         <ul className="space-y-0.5">
           {analysis.anomalies.map((a, i) => (
-            <li key={i} className="text-xs text-orange-300/90">
+            <li
+              key={i}
+              className="whitespace-normal break-words text-xs leading-relaxed text-orange-300/90"
+            >
               • {a}
             </li>
           ))}
@@ -468,20 +480,25 @@ function AudioBlock({ transcript }: { transcript: AudioTranscript }) {
   return (
     <div className="mt-2 space-y-2">
       {src && (
-        <audio key={src} controls preload="metadata" className="w-full">
+        <audio
+          key={src}
+          controls
+          preload="metadata"
+          className="block w-full"
+        >
           <source src={src} />
           Your browser cannot play this recording.
         </audio>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
         <span>engine: {transcript.engine}</span>
         <span>{transcript.duration_s.toFixed(0)}s</span>
         <span>{transcript.segments.length} turn(s)</span>
         <Badge
           variant="outline"
           className={cn(
-            "h-4 px-1 text-[10px]",
+            "h-4 shrink-0 px-1 text-[10px]",
             transcript.threat_detected
               ? "border-red-500/40 bg-red-500/15 text-red-300"
               : transcript.hostility_score >= 0.45
@@ -516,10 +533,10 @@ function AudioBlock({ transcript }: { transcript: AudioTranscript }) {
               seg.hostility >= 0.45 ? "border-l-red-500 bg-red-500/5" : "border-l-border",
             )}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span
                 className={cn(
-                  "rounded px-1 font-mono text-[9px] uppercase",
+                  "shrink-0 rounded px-1 font-mono text-[9px] uppercase",
                   seg.speaker === "driver"
                     ? "bg-amber-500/15 text-amber-300"
                     : seg.speaker === "rider"
@@ -529,21 +546,25 @@ function AudioBlock({ transcript }: { transcript: AudioTranscript }) {
               >
                 {seg.speaker}
               </span>
-              <span className="font-mono text-[9px] text-muted-foreground">
+              <span className="shrink-0 font-mono text-[9px] text-muted-foreground">
                 {seg.start_s.toFixed(1)}–{seg.end_s.toFixed(1)}s
               </span>
               {seg.hostility >= 0.45 && (
-                <span className="ml-auto font-mono text-[9px] text-red-300">
+                <span className="ml-auto shrink-0 font-mono text-[9px] text-red-300">
                   hostility {seg.hostility.toFixed(2)}
                 </span>
               )}
             </div>
-            <p className="mt-0.5 text-xs leading-snug text-foreground/90">{seg.text}</p>
+            <p className="mt-1 whitespace-normal break-words text-xs leading-relaxed text-foreground/90">
+              {seg.text}
+            </p>
           </li>
         ))}
       </ol>
 
-      <p className="text-xs leading-relaxed text-muted-foreground">{transcript.summary}</p>
+      <p className="whitespace-normal break-words text-xs leading-relaxed text-muted-foreground">
+        {transcript.summary}
+      </p>
     </div>
   );
 }
@@ -580,7 +601,7 @@ function MediaUploader({ caseId, disabled }: { caseId: string | null; disabled: 
   return (
     <div className="rounded-md border border-dashed border-border px-3 py-2.5">
       <p className="text-[11px] font-medium">Attach a payload to this case</p>
-      <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+      <p className="mt-1 whitespace-normal break-words text-[10px] leading-relaxed text-muted-foreground">
         Uploaded through <span className="font-mono">/upload-audio</span> /{" "}
         <span className="font-mono">/upload-video</span>. The ASR and keyframe
         pipelines run on it, then it is folded into the dossier on the next run.
@@ -629,8 +650,16 @@ function MediaUploader({ caseId, disabled }: { caseId: string | null; disabled: 
           }}
         />
       </div>
-      {note && <p className="mt-2 text-[11px] text-emerald-400">{note}</p>}
-      {error && <p className="mt-2 text-[11px] text-red-400">{error}</p>}
+      {note && (
+        <p className="mt-2 whitespace-normal break-words text-[11px] leading-relaxed text-emerald-400">
+          {note}
+        </p>
+      )}
+      {error && (
+        <p className="mt-2 whitespace-normal break-words text-[11px] leading-relaxed text-red-400">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

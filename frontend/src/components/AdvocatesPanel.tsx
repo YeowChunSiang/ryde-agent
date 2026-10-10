@@ -51,16 +51,20 @@ function ArgumentCard({
   return (
     <article className={cn("rounded-lg border px-4 py-3", accent)}>
       <header className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline" className={cn("h-5 px-1.5 text-[10px]", chip)}>
+        <Badge variant="outline" className={cn("h-5 shrink-0 px-1.5 text-[10px]", chip)}>
           {party === "rider" ? "RIDER ADVOCATE" : "DRIVER ADVOCATE"}
         </Badge>
-        <span className="text-sm font-semibold leading-snug">{argument.headline}</span>
-        <span className="ml-auto font-mono text-xs text-muted-foreground">
+        <span className="min-w-0 flex-1 whitespace-normal break-words text-sm font-semibold leading-relaxed">
+          {argument.headline}
+        </span>
+        <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground">
           confidence {(argument.confidence * 100).toFixed(0)}%
         </span>
       </header>
 
-      <p className="mt-2 text-sm leading-relaxed text-foreground/90">{argument.claim}</p>
+      <p className="mt-2 whitespace-normal break-words text-sm leading-relaxed text-foreground/90">
+        {argument.claim}
+      </p>
 
       <div className="mt-3 space-y-2">
         <Field label="Requested outcome">
@@ -104,7 +108,10 @@ function ArgumentCard({
           <Field label="Declared weaknesses">
             <ul className="space-y-0.5">
               {argument.weaknesses.map((w, i) => (
-                <li key={i} className="text-xs text-muted-foreground">
+                <li
+                  key={i}
+                  className="whitespace-normal break-words text-xs leading-relaxed text-muted-foreground"
+                >
                   • {w}
                 </li>
               ))}

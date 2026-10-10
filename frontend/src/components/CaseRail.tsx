@@ -52,8 +52,10 @@ export function CaseRail({ cases, selected, onSelect, disabled }: Props) {
                     <ImageIcon className="h-3 w-3 shrink-0 text-fuchsia-400" aria-label="has media" />
                   )}
                 </div>
-                <p className="mt-1 text-xs font-medium leading-snug">{c.title}</p>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                <p className="mt-1 whitespace-normal break-words text-xs font-medium leading-relaxed">
+                  {c.title}
+                </p>
+                <p className="mt-1 whitespace-normal break-words text-[11px] leading-relaxed text-muted-foreground">
                   {c.blurb}
                 </p>
                 <p className="mt-1.5 text-[10px] uppercase tracking-wide text-emerald-400/80">

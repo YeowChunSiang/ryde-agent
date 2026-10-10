@@ -93,7 +93,9 @@ export function EscalationPanel({ result, onOverridden }: Props) {
               </span>
             )}
           </div>
-          <p className="mt-2 text-sm leading-relaxed text-foreground/90">{packet.case_summary}</p>
+          <p className="mt-2 whitespace-normal break-words text-sm leading-relaxed text-foreground/90">
+            {packet.case_summary}
+          </p>
 
           {packet.evidence_digest.length > 0 && (
             <Bullets title="Evidence digest" items={packet.evidence_digest} />
@@ -108,7 +110,7 @@ export function EscalationPanel({ result, onOverridden }: Props) {
             <Bullets title="Recommended focus" items={packet.recommended_focus} />
           )}
           {packet.judge_recommendation && (
-            <p className="mt-2 border-l-2 border-orange-500/40 pl-2 text-xs italic text-muted-foreground">
+            <p className="mt-2 whitespace-normal break-words border-l-2 border-orange-500/40 pl-2 text-xs italic leading-relaxed text-muted-foreground">
               {packet.judge_recommendation}
             </p>
           )}
@@ -121,17 +123,20 @@ export function EscalationPanel({ result, onOverridden }: Props) {
             <BookMarked className="h-3.5 w-3.5" />
             Learning Loop Closed
           </h3>
-          <p className="mt-2 text-sm leading-relaxed">
-            Human decision <span className="font-semibold">{DECISION_META[result.override.new_decision].label}</span>
+          <p className="mt-2 whitespace-normal break-words text-sm leading-relaxed">
+            Human decision{" "}
+            <span className="font-semibold">
+              {DECISION_META[result.override.new_decision].label}
+            </span>
             {result.override.new_amount > 0 && (
               <span className="font-mono"> · S${result.override.new_amount.toFixed(2)}</span>
             )}{" "}
             stored as precedent{" "}
             <code className="font-mono text-xs">{result.override.precedent_id ?? "—"}</code>.
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Knowledge base now holds {result.override.knowledge_base_size} precedents — the next
-            analogous dispute is judged against this ruling.
+          <p className="mt-1 whitespace-normal break-words text-xs leading-relaxed text-muted-foreground">
+            Knowledge base now holds {result.override.knowledge_base_size} precedents — the
+            next analogous dispute is judged against this ruling.
           </p>
         </section>
       ) : (
@@ -196,7 +201,11 @@ export function EscalationPanel({ result, onOverridden }: Props) {
               />
             </label>
 
-            {error && <p className="text-xs text-red-300">{error}</p>}
+            {error && (
+              <p className="whitespace-normal break-words text-xs leading-relaxed text-red-300">
+                {error}
+              </p>
+            )}
 
             <Button onClick={submit} disabled={busy} size="sm" className="h-8 w-full">
               {busy ? (
@@ -206,7 +215,7 @@ export function EscalationPanel({ result, onOverridden }: Props) {
               )}
               {busy ? "Writing precedent…" : "Submit override & teach the system"}
             </Button>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="whitespace-normal break-words text-[11px] leading-relaxed text-muted-foreground">
               Overriding replaces the {ruling ? titleCase(ruling.decision) : "judge"} ruling and
               injects your decision into the Policy &amp; Precedent knowledge base.
             </p>
@@ -234,7 +243,7 @@ function Bullets({
           <li
             key={i}
             className={cn(
-              "text-xs leading-relaxed",
+              "whitespace-normal break-words text-xs leading-relaxed",
               tone === "warning" ? "text-orange-300/90" : "text-foreground/80",
             )}
           >

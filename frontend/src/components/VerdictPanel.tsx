@@ -64,10 +64,12 @@ export function VerdictPanel({ result, threshold = 0.7 }: Props) {
       {ruling.escalated && (
         <div className="flex items-start gap-2 rounded-lg border border-orange-500/30 bg-orange-500/5 px-4 py-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-orange-400" />
-          <div>
-            <p className="text-sm font-semibold text-orange-300">Escalated to a human reviewer</p>
+          <div className="min-w-0 flex-1">
+            <p className="whitespace-normal break-words text-sm font-semibold text-orange-300">
+              Escalated to a human reviewer
+            </p>
             {ruling.escalation_reason && (
-              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+              <p className="mt-1 whitespace-normal break-words text-xs leading-relaxed text-muted-foreground">
                 {ruling.escalation_reason}
               </p>
             )}
@@ -79,7 +81,9 @@ export function VerdictPanel({ result, threshold = 0.7 }: Props) {
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Reasoning
         </h3>
-        <p className="mt-2 text-sm leading-relaxed text-foreground/90">{ruling.reasoning}</p>
+        <p className="mt-2 whitespace-normal break-words text-sm leading-relaxed text-foreground/90">
+          {ruling.reasoning}
+        </p>
       </section>
 
       {ruling.key_findings.length > 0 && (
@@ -89,9 +93,12 @@ export function VerdictPanel({ result, threshold = 0.7 }: Props) {
           </h3>
           <ul className="mt-2 space-y-1">
             {ruling.key_findings.map((finding, i) => (
-              <li key={i} className="flex gap-2 text-sm leading-relaxed">
+              <li
+                key={i}
+                className="flex gap-2 whitespace-normal break-words text-sm leading-relaxed"
+              >
                 <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                <span>{finding}</span>
+                <span className="min-w-0 flex-1">{finding}</span>
               </li>
             ))}
           </ul>
@@ -121,13 +128,17 @@ export function VerdictPanel({ result, threshold = 0.7 }: Props) {
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
             Message to rider
           </p>
-          <p className="mt-1 text-sm leading-relaxed">{ruling.rider_summary}</p>
+          <p className="mt-1 whitespace-normal break-words text-sm leading-relaxed">
+            {ruling.rider_summary}
+          </p>
         </div>
         <div className="rounded-lg border border-border bg-card/50 px-3 py-2">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
             Message to driver
           </p>
-          <p className="mt-1 text-sm leading-relaxed">{ruling.driver_summary}</p>
+          <p className="mt-1 whitespace-normal break-words text-sm leading-relaxed">
+            {ruling.driver_summary}
+          </p>
         </div>
       </section>
 
