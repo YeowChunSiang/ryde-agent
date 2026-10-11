@@ -925,8 +925,13 @@ class Orchestrator:
             )
             return
         try:
-            analysis = await asyncio.to_thread(
-                analyse_video, path, self.settings, attachment.attachment_id
+            loop = asyncio.get_running_loop()
+            analysis = await loop.run_in_executor(
+                None,
+                analyse_video,
+                path,
+                self.settings,
+                attachment.attachment_id,
             )
         except VideoProcessingError as exc:
             await run.emit(

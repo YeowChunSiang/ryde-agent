@@ -436,8 +436,13 @@ async def upload_video(
     )
 
     try:
-        analysis = await asyncio.to_thread(
-            analyse_video, saved, settings, attachment.attachment_id
+        loop = asyncio.get_running_loop()
+        analysis = await loop.run_in_executor(
+            None,
+            analyse_video,
+            saved,
+            settings,
+            attachment.attachment_id,
         )
     except VideoProcessingError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
