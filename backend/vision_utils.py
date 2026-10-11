@@ -173,42 +173,23 @@ def extract_frames(
     Frames are written as JPEGs into ``out_dir``. Extraction is deterministic:
     the same clip always yields the same frame files, which matters because the
     judge's ruling cites them.
+
+    Backend preference:
+      1. ``ffmpeg`` binary subprocess — best quality and speed when present;
+      2. OpenCV (``cv2.VideoCapture``) — works even when ffmpeg is absent, so
+         the demo never hard-fails on a host without ffmpeg installed.
     """
     if not path.exists():
         raise VideoProcessingError(f"video not found: {path}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        import ffmpeg  # type: ignore
-
-        (
-            ffmpeg.input(str(path))
-            .filter("fps", fps=fps)
-            .output(str(out_dir / f"{prefix}_%03d.jpg"), start_number=0, **{"qscale:v": 3})
-            .overwrite_output()
-            .run(quiet=True, capture_stdout=True, capture_stderr=True)
-        )
-    except Exception:
-        if not ffmpeg_available():
-            raise VideoProcessingError(
-                "no video backend available (install ffmpeg or opencv-python)"
-            ) from None
-        subprocess.run(
-            [
-                shutil.which("ffmpeg") or "ffmpeg",
-                "-y",
-                "-i",
-                str(path),
-                "-vf",
-                f"fps={fps}",
-                "-qscale:v",
-                "3",
-                str(out_dir / f"{prefix}_%03d.jpg"),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
+    if ffmpeg_available():
+        _extract_frames_ffmpeg(path, out_dir, fps=fps, prefix=prefix)
+    elif opencv_available():
+        _extract_frames_opencv(path, out_dir, fps=fps, max_frames=max_frames, prefix=prefix)
+    else:
+        raise VideoProcessingError(
+            "no video backend available (install ffmpeg or opencv-python)"
         )
 
     files = sorted(out_dir.glob(f"{prefix}_*.jpg"))
@@ -232,6 +213,88 @@ def extract_frames(
             )
         )
     return frames
+
+
+def _extract_frames_ffmpeg(path: Path, out_dir: Path, fps: float, prefix: str) -> None:
+    """Extract keyframes using the ``ffmpeg`` binary (most reliable backend)."""
+    try:
+        import ffmpeg  # type: ignore
+
+        (
+            ffmpeg.input(str(path))
+            .filter("fps", fps=fps)
+            .output(str(out_dir / f"{prefix}_%03d.jpg"), start_number=0, **{"qscale:v": 3})
+            .overwrite_output()
+            .run(quiet=True, capture_stdout=True, capture_stderr=True)
+        )
+    except Exception:
+        subprocess.run(
+            [
+                shutil.which("ffmpeg") or "ffmpeg",
+                "-y",
+                "-i",
+                str(path),
+                "-vf",
+                f"fps={fps}",
+                "-qscale:v",
+                "3",
+                str(out_dir / f"{prefix}_%03d.jpg"),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+
+
+def _extract_frames_opencv(
+    path: Path,
+    out_dir: Path,
+    fps: float,
+    max_frames: int,
+    prefix: str,
+) -> None:
+    """Extract keyframes using OpenCV when ffmpeg is unavailable.
+
+    Walks the clip, keeping the frame closest to each target timestamp so the
+    same clip always yields the same keyframe set.
+    """
+    import cv2  # type: ignore
+
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        raise VideoProcessingError(f"cannot open video for frame extraction: {path.name}")
+
+    src_fps = cap.get(cv2.CAP_PROP_FPS) or fps or 1.0
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+
+    # Target timestamps at ``fps`` samples per second, capped at ``max_frames``.
+    target_ts = []
+    t = 0.0
+    while len(target_ts) < max_frames and t < (total / src_fps if total else 1e9):
+        target_ts.append(t)
+        t += 1.0 / fps
+
+    written = 0
+    next_target_idx = 0
+    frame_idx = 0
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        current_ts = frame_idx / src_fps
+        if next_target_idx < len(target_ts) and current_ts >= target_ts[next_target_idx]:
+            out_path = out_dir / f"{prefix}_{written:03d}.jpg"
+            cv2.imwrite(str(out_path), frame)
+            written += 1
+            next_target_idx += 1
+        frame_idx += 1
+        if next_target_idx >= len(target_ts):
+            break
+    cap.release()
+
+    if written == 0:
+        raise VideoProcessingError(f"OpenCV extracted no frames from: {path.name}")
 
 
 def _frame_metrics(path: Path) -> dict:

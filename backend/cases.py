@@ -349,9 +349,10 @@ DISP_004: dict[str, Any] = {
         "filed_by": "driver",
         "dispute_type": "property_damage",
         "description": (
-            "A rider spilled bubble tea across the rear seat and floor mat during the trip. I had to "
-            "take the car out of service for professional cleaning. I am claiming the $60 cleaning "
-            "fee with photo evidence taken immediately at the dropoff point."
+            "A rider left a box of french fries and chilli sauce smeared across the rear seat and "
+            "floor mat during the trip. I had to take the car out of service for professional "
+            "cleaning. I am claiming the $60 cleaning fee with photo evidence taken immediately "
+            "at the dropoff point."
         ),
         "filed_at": "2026-09-16T20:35:00+08:00",
         "status": "open",
@@ -398,13 +399,13 @@ DISP_004: dict[str, Any] = {
         {"timestamp": "2026-09-16T20:28:00+08:00", "lat": 1.3545, "lng": 103.9432, "speed_kmh": 0, "status": "completed"},
     ],
     "chat_logs": [
-        {"timestamp": "2026-09-16T20:29:00+08:00", "sender": "driver", "type": "message", "content": "Sorry, but the bubble tea spilled on the rear seat. I have to file a cleaning claim."},
-        {"timestamp": "2026-09-16T20:31:00+08:00", "sender": "rider", "type": "message", "content": "It slipped out of my bag when we braked, I'm sorry."},
+        {"timestamp": "2026-09-16T20:29:00+08:00", "sender": "driver", "type": "message", "content": "Sorry, but there are french fries and chilli sauce smeared on the rear seat. I have to file a cleaning claim."},
+        {"timestamp": "2026-09-16T20:31:00+08:00", "sender": "rider", "type": "message", "content": "The fries fell out of the bag when we braked and the chilli sauce spilled — I'm sorry."},
     ],
     "app_events": [
         {"timestamp": "2026-09-16T20:28:00+08:00", "event_type": "trip_completed", "details": "Trip completed. 16.9 km, 26 min. Fare $24.50 charged."},
-        {"timestamp": "2026-09-16T20:33:00+08:00", "event_type": "evidence_uploaded", "details": "Driver uploaded 1 image as evidence (cabin_photo_02.jpg). EXIF capture time 20:33, GPS matches dropoff."},
-        {"timestamp": "2026-09-16T20:35:00+08:00", "event_type": "cleaning_claim_filed", "details": "Driver D-1188 filed a cleaning claim of $60.00 for a liquid spill."},
+        {"timestamp": "2026-09-16T20:33:00+08:00", "event_type": "evidence_uploaded", "details": "Driver uploaded 1 image as evidence (cabin_photo_02.jpg). EXIF capture time 20:33, GPS matches dropoff. Photo shows french fries and chilli sauce smeared on the rear seat."},
+        {"timestamp": "2026-09-16T20:35:00+08:00", "event_type": "cleaning_claim_filed", "details": "Driver D-1188 filed a cleaning claim of $60.00 for a food spill (french fries and chilli sauce)."},
     ],
     "media_attachments": [
         {
@@ -419,7 +420,7 @@ DISP_004: dict[str, Any] = {
             "gps_lng": 103.9432,
             "exif_present": True,
             "ai_generated_probability": 0.08,
-            "caption": "Bubble tea spilled across the rear seat and floor mat immediately after dropoff",
+            "caption": "French fries and chilli sauce smeared across the rear seat and floor mat immediately after dropoff",
         }
     ],
     "cancellation_policy": {
@@ -611,11 +612,10 @@ DISP_006: dict[str, Any] = {
         "filed_by": "rider",
         "dispute_type": "safety_incident",
         "description": (
-            "I asked the driver to lower the air-conditioning because the cabin was "
-            "uncomfortably hot. He refused aggressively, started shouting at me and insulted me "
-            "for the rest of the ride. I recorded the whole argument on my phone. No passenger "
-            "should be spoken to like that for asking to be comfortable — I want this driver "
-            "reprimanded."
+            "I asked the driver to turn the air-conditioning up because the cabin was "
+            "uncomfortably cold. He refused aggressively and shouted at me for the rest of the "
+            "ride. I recorded the whole argument on my phone. No passenger should be spoken to "
+            "like that just for asking to be comfortable — I want this driver reprimanded."
         ),
         "filed_at": "2026-09-18T23:55:00+08:00",
         "status": "open",
@@ -661,9 +661,10 @@ DISP_006: dict[str, Any] = {
         {"timestamp": "2026-09-18T23:49:00+08:00", "lat": 1.3691, "lng": 103.8454, "speed_kmh": 0, "status": "completed"},
     ],
     "chat_logs": [
-        {"timestamp": "2026-09-18T23:36:00+08:00", "sender": "rider", "type": "message", "content": "Hi, could you turn the air-con down a little? It is very warm in the back."},
-        {"timestamp": "2026-09-18T23:37:00+08:00", "sender": "driver", "type": "message", "content": "It is my car, I decide the temperature. Deal with it."},
-        {"timestamp": "2026-09-18T23:39:00+08:00", "sender": "rider", "type": "message", "content": "I am just asking politely — you do not need to shout at me."},
+        {"timestamp": "2026-09-18T23:36:00+08:00", "sender": "rider", "type": "message", "content": "Hi, can you turn the air-con up? It is freezing in the back here."},
+        {"timestamp": "2026-09-18T23:37:00+08:00", "sender": "driver", "type": "message", "content": "I am not turning the AC lower, it is already freezing in here!"},
+        {"timestamp": "2026-09-18T23:38:00+08:00", "sender": "rider", "type": "message", "content": "I paid for this ride, I should be comfortable!"},
+        {"timestamp": "2026-09-18T23:39:00+08:00", "sender": "driver", "type": "message", "content": "Then get another car!"},
         {"timestamp": "2026-09-18T23:50:00+08:00", "sender": "rider", "type": "message", "content": "I have recorded the whole argument, I am filing a safety report."},
     ],
     "app_events": [
@@ -693,19 +694,18 @@ DISP_006: dict[str, Any] = {
             # With live TRTC credentials this hint is ignored and the real
             # waveform is transcribed instead.
             "transcript_hint": (
-                "rider: Could you please lower the air-conditioning? It is really hot back here. | "
-                "driver: No! I decide the temperature in my own car, you stupid passenger. | "
-                "rider: Please, I am only asking you to turn it down a little. Why are you shouting at me? | "
-                "driver: Shut up and sit there! Keep arguing and I will find you after this trip!"
+                "rider: I am not turning the AC lower, it is already freezing in here! | "
+                "rider: I paid for this ride, I should be comfortable! | "
+                "driver: Then get another car!"
             ),
         }
     ],
     # --- Phase 3.2: triage band + reviewer directives ----------------------
     "sla_priority": "high",
     "sla_priority_reason": (
-        "Verbal-altercation safety escalation: the attached recording captures sustained "
-        "shouting and insults, so the ticket is fast-tracked — but it is not an immediate "
-        "physical threat, so it sits below CRITICAL."
+        "Verbal-altercation safety escalation: the attached recording captures a heated "
+        "cabin-temperature argument, so the ticket is fast-tracked — but it is not an "
+        "immediate physical threat, so it sits below CRITICAL."
     ),
     "financial_value": 22.00,
     "financial_note": "Fare charged, plus a goodwill voucher on review",

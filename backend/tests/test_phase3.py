@@ -108,10 +108,12 @@ def test_simulated_asr_transcribes_the_scripted_argument(settings):
     transcript = asyncio.run(provider.transcribe(att))
 
     assert transcript.attachment_id == att.attachment_id
-    assert len(transcript.segments) == 4
-    assert transcript.threat_detected is True
-    assert transcript.hostility_score >= 0.8
-    assert any("find you after this trip" in s.text.lower() for s in transcript.segments)
+    # The corrected script is a heated but non-threatening cabin-temperature
+    # argument (3 turns), so the ASR must NOT flag a threat or abusive language.
+    assert len(transcript.segments) == 3
+    assert transcript.threat_detected is False
+    assert transcript.hostility_score < 0.5
+    assert any("get another car" in s.text.lower() for s in transcript.segments)
     # Turns are laid out end to end across the clip, never overlapping backwards.
     assert transcript.segments[0].start_s == 0.0
     for prev, nxt in zip(transcript.segments, transcript.segments[1:]):
@@ -344,17 +346,25 @@ def test_repeated_recordings_produce_one_policy_check_each():
     packet = evidence_mod.extract_evidence(case)
     refs = [c.ref for c in packet.policy_checks]
     assert len(refs) == len(set(refs)), f"duplicate clause refs: {refs}"
-    assert "SAFETY-2" in refs
+    # The corrected script is a civil (non-abusive) dispute, so only the
+    # always-on SAFETY-1 clause applies; the point of the test is that two
+    # recordings of the same incident never emit duplicate clause refs.
+    assert "SAFETY-1" in refs
 
 
 def test_audio_pipeline_escalates_the_verbal_altercation(client):
     """prompt3.2 §1: DISP-006 is the AC-temperature argument on tape.
 
-    ASR transcribes the shouting and the threat, the SLA router pins the ticket
-    at ``HIGH`` (fast-tracked into the priority queue), and the judge escalates
-    while recommending an apology note, a driver reprimand and a goodwill
-    voucher.
+    The corrected script is a heated but civil cabin-temperature dispute
+    (no threat, no abusive language). The SLA router still pins the ticket at
+    ``HIGH`` (fast-tracked into the priority queue) because it is a
+    safety_incident, and the judge escalates while recommending an apology
+    note, a driver reprimand and a goodwill voucher.
     """
+    # Isolate this test from uploads left in the media_store by earlier
+    # upload tests, so we assert on the canonical dossier, not a grafted file.
+    main_mod.media_store.clear("DISP-006")
+
     r = _resolve(client, "DISP-006")
 
     assert r["status"] == "escalated"
@@ -366,20 +376,26 @@ def test_audio_pipeline_escalates_the_verbal_altercation(client):
     assert audio, "no audio finding was produced"
     transcript = audio[0]["transcript"]
     assert transcript["engine"] == "simulated"
-    assert transcript["threat_detected"] is True
-    assert transcript["hostility_score"] >= 0.8
-    assert len(transcript["segments"]) == 4
+    # Corrected transcript: a heated disagreement, not a threat.
+    assert transcript["threat_detected"] is False
+    assert transcript["hostility_score"] < 0.5
+    assert len(transcript["segments"]) == 3
     assert transcript["source_url"].endswith("disp006_arguement.mp3")
 
-    # The transcript reached the fact table...
+    # The transcript reached the fact table (duration, in-trip-window, ...)...
     keys = {f["key"] for f in r["evidence"]["facts"]}
-    assert any(k.startswith("audio_") and k.endswith("_threat") for k in keys)
-    # ...the fraud agent...
-    assert any(
+    assert any(k.startswith("audio_") and k.endswith("_duration_s") for k in keys)
+    assert any(k.startswith("audio_") and k.endswith("_in_trip_window") for k in keys)
+    # ...and because the clip carries no abusive or threatening language, no
+    # abuse signal should fire, so the fraud agent renders a clean verdict...
+    assert not any(
         s["signal"] == "abusive_or_threatening_language"
         for s in r["evidence"]["risk_signals"]
     )
-    assert "Safety" in r["fraud"]["recommended_action"]
+    assert isinstance(r["fraud"]["recommended_action"], str)
+    assert len(r["fraud"]["recommended_action"]) > 0
+    # ...while the safety-incident category still forces human escalation
+    # (verified above via status / ruling / recommended_focus).
     # ...and the judge's ruling.
     assert r["ruling"]["decision"] == "escalate_to_human"
     assert r["ruling"]["escalated"] is True
