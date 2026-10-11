@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Route } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route } from 'react-router-dom';
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AnimatedRoutes } from "@/components/AnimatedRoutes";
 import { PageTransition } from "@/components/PageTransition";
-import { CasePersistenceProvider } from "@/components/CasePersistenceContext";
+import { CasePersistenceProvider, useCaseStore } from "@/components/CasePersistenceContext";
 import Index from "./pages/Index";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -34,6 +34,11 @@ const queryClient = new QueryClient({
   },
 });
 
+function HomeGate() {
+  const { session } = useCaseStore();
+  return <Navigate to={session ? "/dashboard" : "/login"} replace />;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -41,12 +46,33 @@ function App() {
         <Toaster />
         <BrowserRouter>
           {/* Phase 3.2: arbitration cache + reviewer session live above the
-              router so /login, /dashboard and / all share one store. */}
+              router so /login, /dashboard and /review all share one store. */}
           <CasePersistenceProvider>
             <AnimatedRoutes>
-              <Route path="/" data-genie-title="Home Page" data-genie-key="Home" element={<PageTransition transition="slide-up"><Index /></PageTransition>} />
-              <Route path="/login" data-genie-key="Login" data-genie-title="Reviewer Sign In" element={<PageTransition transition="fade"><Login /></PageTransition>} />
-              <Route path="/dashboard" data-genie-key="Dashboard" data-genie-title="Reviewer Dashboard" element={<PageTransition transition="slide-up"><Dashboard /></PageTransition>} />
+              <Route
+                path="/"
+                data-genie-title="Home"
+                data-genie-key="Home"
+                element={<PageTransition transition="fade"><HomeGate /></PageTransition>}
+              />
+              <Route
+                path="/login"
+                data-genie-key="Login"
+                data-genie-title="Reviewer Sign In"
+                element={<PageTransition transition="fade"><Login /></PageTransition>}
+              />
+              <Route
+                path="/dashboard"
+                data-genie-key="Dashboard"
+                data-genie-title="Reviewer Dashboard"
+                element={<PageTransition transition="slide-up"><Dashboard /></PageTransition>}
+              />
+              <Route
+                path="/review"
+                data-genie-title="Case Review"
+                data-genie-key="Review"
+                element={<PageTransition transition="slide-up"><Index /></PageTransition>}
+              />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" data-genie-key="NotFound" data-genie-title="Not Found" element={<PageTransition transition="fade"><NotFound /></PageTransition>} />
             </AnimatedRoutes>

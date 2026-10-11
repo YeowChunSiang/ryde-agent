@@ -206,12 +206,12 @@ export interface VideoAnalysis {
   engine: "ffmpeg" | "opencv" | "unavailable";
 }
 
-/** Response of `POST /upload-audio` and `POST /upload-video`. */
+/** Response of `POST /upload-audio`, `POST /upload-image` and `POST /upload-video`. */
 export interface MediaUploadResult {
   status: string;
   dispute_id: string;
   attachment_id: string;
-  media_type: "audio" | "video";
+  media_type: "audio" | "image" | "video";
   filename: string;
   web_path: string;
   duration_s?: number | null;
@@ -354,6 +354,7 @@ export type CaseRunStatus =
   | "idle"
   | "pending"
   | "processing"
+  | "awaiting_review"
   | "resolved"
   | "escalated"
   | "failed";

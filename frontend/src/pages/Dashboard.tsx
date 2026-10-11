@@ -45,7 +45,7 @@ const CONCURRENCY = 2;
  * Phase 3.2 — the Reviewer Portal board.
  *
  * Landing here kicks off background arbitration for every incoming ticket that
- * has not been run yet (`pending` → `processing` → `resolved` / `escalated`).
+ * has not been run yet (`pending` → `processing` → `awaiting_review` / `escalated`).
  * The queue is then ordered by SLA urgency and financial exposure, escalations
  * are hoisted into their own "Action Required" section, and closing a ticket
  * (Approve or Override) moves it to the History tab with a full audit trail.
@@ -212,7 +212,7 @@ export default function Dashboard() {
   const reviewerName = session?.name ?? "Reviewer";
 
   const onReview = useCallback(
-    (row: DisputeRow) => navigate(`/?case=${row.case_id}`),
+    (row: DisputeRow) => navigate(`/review?case=${row.case_id}`),
     [navigate],
   );
 
@@ -277,7 +277,9 @@ export default function Dashboard() {
           financial_value: c.financial_value ?? 0,
           financial_note: c.financial_note ?? null,
           evidence_kind: c.evidence_kind ?? null,
-          sla_priority: result?.routing?.priority ?? c.sla_priority ?? null,
+          // Prioritisation is assigned only after arbitration has produced
+          // routing output.
+          sla_priority: result?.routing?.priority ?? null,
           queue: result?.routing?.queue ?? null,
           sla_due_at: result?.routing?.sla_due_at ?? null,
           status: rec?.status ?? "idle",
@@ -420,10 +422,10 @@ export default function Dashboard() {
         <Tabs value={tab} onValueChange={(v) => setTab(v as "queue" | "history")} className="mt-4">
           <TabsList className="grid w-full max-w-sm grid-cols-2">
             <TabsTrigger value="queue" className="text-xs">
-              Active Queue ({activeRows.length})
+              New ({activeRows.length})
             </TabsTrigger>
             <TabsTrigger value="history" className="text-xs">
-              History ({historyRows.length})
+              Archived ({historyRows.length})
             </TabsTrigger>
           </TabsList>
 
@@ -452,7 +454,7 @@ export default function Dashboard() {
             <section>
               <SectionHeader
                 title="Standard Agent Determinations (Awaiting Review)"
-                hint="Auto-resolved tickets, ordered by SLA urgency then financial exposure."
+                hint="Agent-determined tickets awaiting human review, ordered by SLA urgency then financial exposure."
                 tone="zinc"
                 icon={<ShieldCheck className="h-3.5 w-3.5" />}
               />
@@ -471,7 +473,7 @@ export default function Dashboard() {
 
           <TabsContent value="history" className="mt-4">
             <SectionHeader
-              title="History — closed tickets & audit trail"
+              title="Archived — closed tickets & audit trail"
               hint="Resolution status, reviewer action, original vs final verdict and timestamp."
               tone="emerald"
               icon={<BookMarked className="h-3.5 w-3.5" />}

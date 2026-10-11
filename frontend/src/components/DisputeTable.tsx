@@ -300,7 +300,7 @@ export function DisputeTable({
                       size="sm"
                       className="h-7 gap-1 px-2 text-[11px]"
                       onClick={() => onReview?.(row)}
-                      disabled={!row.run_id && row.status !== "resolved" && row.status !== "escalated"}
+                      disabled={!row.run_id}
                     >
                       <ExternalLink className="h-3 w-3" />
                       Review
@@ -532,16 +532,24 @@ function RunStatusPill({
       </span>
     );
   }
-  if (status === "resolved") {
+  if (status === "awaiting_review") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-300">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-        resolved
+      <span className="inline-flex items-center gap-1.5 text-[11px] text-sky-300">
+        <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+        awaiting human review
         {confidence !== null && (
           <span className="font-mono text-[10px] text-muted-foreground">
             {(confidence * 100).toFixed(0)}%
           </span>
         )}
+      </span>
+    );
+  }
+  if (status === "resolved") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-300">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+        archived
       </span>
     );
   }

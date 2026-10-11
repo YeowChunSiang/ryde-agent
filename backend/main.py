@@ -13,6 +13,9 @@ POST         /dispute                 Ingest a dispute, start arbitration, retur
 GET          /stream/{run_id}         SSE stream of live inter-agent messages
 GET          /stream                  SSE stream for the most recent run
 GET          /result/{run_id}         Final resolution result
+POST         /upload-audio            Upload + transcribe in-cabin recording
+POST         /upload-image            Upload + analyse photo evidence
+POST         /upload-video            Upload + keyframe-analyse video evidence
 POST         /resolve                 Synchronous resolve (no streaming) — for tests
 POST         /login                   Reviewer Portal session (mock identity provider)
 POST         /approve/{run_id}        Reviewer approves the ruling, closes the ticket
@@ -38,6 +41,8 @@ from fastapi.staticfiles import StaticFiles
 from cases import CASE_REGISTRY, get_case, list_cases
 from config import get_settings
 from media_store import MediaStore, media_type_for
+from evidence import extract_evidence
+from adp_client import OfflineReasoner
 from models import (
     AgentRole,
     ApprovalAccepted,
@@ -141,8 +146,8 @@ def _resolve_case(payload: DisputeRequest) -> DisputeCase:
             case = get_case(payload.case_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-    # Graft anything uploaded earlier through /upload-audio or /upload-video
-    # onto the dossier, keyed by the case or dispute id.
+    # Graft anything uploaded earlier through /upload-audio, /upload-video or
+    # /upload-image onto the dossier, keyed by the case or dispute id.
     merged = media_store.merge_into(case)
     if merged:
         logger.info(
@@ -232,7 +237,7 @@ async def case_detail(case_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Phase 3: multi-modal ingestion (audio + video)
+# Phase 3: multi-modal ingestion (audio + image + video)
 # ---------------------------------------------------------------------------
 
 
@@ -317,6 +322,81 @@ async def upload_audio(
         "stored_at": web_path,
         "attached_to": case_id,
         "asr_engine": transcript.engine,
+    }
+
+
+@app.post("/upload-image")
+async def upload_image(
+    file: UploadFile = File(...),
+    case_id: Optional[str] = Form(default=None),
+    uploaded_by: str = Form(default="rider"),
+    captured_at: Optional[str] = Form(default=None),
+    caption: Optional[str] = Form(default=None),
+) -> dict:
+    """Ingest a photo and immediately run image analysis.
+
+    This mirrors the audio/video ingestion path: the payload is persisted,
+    attached to the case for the next arbitration run, and a deterministic
+    image-analysis finding is returned right away so the uploader can verify the
+    evidence was accepted.
+    """
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty image payload")
+    kind = media_type_for(file.filename or "evidence.png")
+    if kind != "image":
+        raise HTTPException(
+            status_code=415, detail=f"'{file.filename}' is not an image payload"
+        )
+
+    saved = media_store.save(file.filename or "evidence.png", raw, "image")
+    attachment = MediaAttachment(
+        media_type="image",
+        url=media_store.web_path(saved),
+        uploaded_by="rider" if uploaded_by not in ("rider", "driver") else uploaded_by,  # type: ignore[arg-type]
+        captured_at=_parse_dt(captured_at),
+        device_model="mobile_camera",
+        exif_present=True,
+        caption=caption or (file.filename or "image evidence"),
+        local_path=str(saved),
+    )
+
+    finding = None
+    if case_id:
+        try:
+            case = get_case(case_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        case.media_attachments.append(attachment)
+        packet = extract_evidence(case)
+        reasoner = OfflineReasoner(settings)
+        finding = await reasoner.run_vision(case, packet, attachment)
+        media_store.attach(case_id, attachment)
+
+    logger.info(
+        "image uploaded: %s (%s, analysed=%s)",
+        attachment.attachment_id,
+        file.filename,
+        bool(finding),
+    )
+    web_path = media_store.web_path(saved)
+    return {
+        "status": "analysed" if finding else "stored",
+        "dispute_id": case_id,
+        "attachment_id": attachment.attachment_id,
+        "media_type": "image",
+        "filename": file.filename or "evidence.png",
+        "web_path": web_path,
+        "vision": finding.model_dump(mode="json") if finding else None,
+        "attachment": attachment.model_dump(mode="json"),
+        "stored_at": web_path,
+        "attached_to": case_id,
+        "message": (
+            "Image analysed and attached to the case."
+            if finding
+            else "Image stored. Provide case_id to run immediate analysis."
+        ),
     }
 
 
@@ -661,6 +741,17 @@ async def api_upload_audio(
     transcript_hint: Optional[str] = Form(default=None),
 ) -> dict:
     return await upload_audio(file, case_id, uploaded_by, captured_at, caption, transcript_hint)
+
+
+@app.post("/api/upload-image")
+async def api_upload_image(
+    file: UploadFile = File(...),
+    case_id: Optional[str] = Form(default=None),
+    uploaded_by: str = Form(default="rider"),
+    captured_at: Optional[str] = Form(default=None),
+    caption: Optional[str] = Form(default=None),
+) -> dict:
+    return await upload_image(file, case_id, uploaded_by, captured_at, caption)
 
 
 @app.post("/api/upload-video")

@@ -42,7 +42,6 @@ import type {
 import { login as loginRequest } from "@/lib/api";
 
 const STORE_KEY = "ryderesolve.case-store.v2";
-const SESSION_KEY = "ryderesolve.session.v1";
 
 /** Cap the replay log so a long session can never exhaust the 5 MB budget. */
 const MAX_EVENTS = 400;
@@ -140,12 +139,6 @@ function loadStore(): CaseStore {
   return clean;
 }
 
-function loadSession(): LoginAccepted | null {
-  const raw = readJSON<LoginAccepted>(SESSION_KEY);
-  if (!raw || typeof raw.token !== "string") return null;
-  return raw;
-}
-
 function stamp(): string {
   return new Date().toISOString();
 }
@@ -154,7 +147,7 @@ function stamp(): string {
 
 export function CasePersistenceProvider({ children }: { children: ReactNode }) {
   const [records, setRecords] = useState<CaseStore>(() => loadStore());
-  const [session, setSession] = useState<LoginAccepted | null>(() => loadSession());
+  const [session, setSession] = useState<LoginAccepted | null>(null);
   const [authPending, setAuthPending] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -163,20 +156,20 @@ export function CasePersistenceProvider({ children }: { children: ReactNode }) {
     recordsRef.current = records;
   }, [records]);
 
-  // Mirror the cache (and the session) so a page refresh restores the board.
+  // Mirror only the case cache so a page refresh can restore arbitration data.
   useEffect(() => {
     writeJSON(STORE_KEY, records);
   }, [records]);
 
+  // Do not persist reviewer sessions across refreshes: every fresh visit
+  // starts at /login to force an explicit sign-in.
   useEffect(() => {
-    if (session) writeJSON(SESSION_KEY, session);
-    else
-      try {
-        window.localStorage.removeItem(SESSION_KEY);
-      } catch {
-        /* ignore */
-      }
-  }, [session]);
+    try {
+      window.localStorage.removeItem("ryderesolve.session.v1");
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const patch = useCallback((caseId: string, partial: Partial<CaseRecord>) => {
     setRecords((prev) => {
@@ -262,7 +255,9 @@ export function CasePersistenceProvider({ children }: { children: ReactNode }) {
       [caseId]: {
         case_id: caseId,
         run_id: result.run_id,
-        status: result.status === "escalated" ? "escalated" : "resolved",
+        // Judge output is never "resolved" in the reviewer portal until a
+        // human approves or overrides it.
+        status: result.status === "escalated" ? "escalated" : "awaiting_review",
         events: prev[caseId]?.events ?? [],
         result,
         review: prev[caseId]?.review ?? null,

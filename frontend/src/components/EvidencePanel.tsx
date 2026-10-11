@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import {
   AudioLines,
   FileSearch2,
@@ -6,19 +6,16 @@ import {
   ImageIcon,
   ShieldAlert,
   ShieldCheck,
-  Upload,
 } from "lucide-react";
 
 import type {
   AudioTranscript,
   EvidencePacket,
-  MediaUploadResult,
   VideoAnalysis,
   VideoFrame,
   VisionFinding,
 } from "@/types";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   MEDIA_KIND_META,
   SEVERITY_META,
@@ -26,14 +23,10 @@ import {
   titleCase,
 } from "./agent-meta";
 import { cn } from "@/lib/utils";
-import { uploadMedia } from "@/lib/api";
 
 interface Props {
   evidence: EvidencePacket | null;
   vision: VisionFinding[];
-  /** Selected case — enables the "attach your own payload" controls. */
-  caseId?: string | null;
-  disabled?: boolean;
   /** Miora-generated evidence assets bundled with the case. */
   assets?: string[];
 }
@@ -47,7 +40,7 @@ interface Props {
  * scoring, and video clips decomposed into 1 fps keyframes that can be scrubbed
  * frame by frame next to the ruling that cites them.
  */
-export function EvidencePanel({ evidence, vision, caseId, disabled, assets }: Props) {
+export function EvidencePanel({ evidence, vision, assets }: Props) {
   if (!evidence && vision.length === 0 && !assets?.length) {
     return (
       <EmptyState icon={<FileSearch2 className="h-5 w-5" />} text="No evidence extracted yet." />
@@ -75,7 +68,6 @@ export function EvidencePanel({ evidence, vision, caseId, disabled, assets }: Pr
             {vision.map((finding) => (
               <MediaCard key={finding.attachment_id} finding={finding} poster={assets?.[0]} />
             ))}
-            <MediaUploader caseId={caseId ?? null} disabled={disabled ?? false} />
           </div>
         </section>
       )}
@@ -569,100 +561,6 @@ function AudioBlock({ transcript }: { transcript: AudioTranscript }) {
   );
 }
 
-/** Attach your own audio/video payload — exercises `/upload-audio` and `/upload-video`. */
-function MediaUploader({ caseId, disabled }: { caseId: string | null; disabled: boolean }) {
-  const audioRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const send = async (kind: "audio" | "video", file: File) => {
-    if (!caseId) return;
-    setBusy(true);
-    setError(null);
-    setNote(null);
-    try {
-      const result: MediaUploadResult = await uploadMedia(kind, caseId, file);
-      const detail =
-        kind === "audio"
-          ? `${result.transcript?.segments.length ?? 0} turn(s) transcribed`
-          : `${result.video?.frames_extracted ?? 0} keyframe(s) extracted`;
-      setNote(`${result.attachment_id} attached — ${detail}. Run arbitration to use it.`);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!caseId) return null;
-
-  return (
-    <div className="rounded-md border border-dashed border-border px-3 py-2.5">
-      <p className="text-[11px] font-medium">Attach a payload to this case</p>
-      <p className="mt-1 whitespace-normal break-words text-[10px] leading-relaxed text-muted-foreground">
-        Uploaded through <span className="font-mono">/upload-audio</span> /{" "}
-        <span className="font-mono">/upload-video</span>. The ASR and keyframe
-        pipelines run on it, then it is folded into the dossier on the next run.
-      </p>
-      <div className="mt-2 flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 text-xs"
-          disabled={disabled || busy}
-          onClick={() => audioRef.current?.click()}
-        >
-          <Upload className="mr-1 h-3 w-3" />
-          {busy ? "Uploading…" : "Audio"}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 text-xs"
-          disabled={disabled || busy}
-          onClick={() => videoRef.current?.click()}
-        >
-          <Upload className="mr-1 h-3 w-3" />
-          {busy ? "Uploading…" : "Video"}
-        </Button>
-        <input
-          ref={audioRef}
-          type="file"
-          accept="audio/*"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void send("audio", f);
-            e.target.value = "";
-          }}
-        />
-        <input
-          ref={videoRef}
-          type="file"
-          accept="video/*"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void send("video", f);
-            e.target.value = "";
-          }}
-        />
-      </div>
-      {note && (
-        <p className="mt-2 whitespace-normal break-words text-[11px] leading-relaxed text-emerald-400">
-          {note}
-        </p>
-      )}
-      {error && (
-        <p className="mt-2 whitespace-normal break-words text-[11px] leading-relaxed text-red-400">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (

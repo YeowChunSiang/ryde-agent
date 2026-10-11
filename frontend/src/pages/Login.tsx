@@ -10,9 +10,9 @@ import { Label } from "@/components/ui/label";
 /**
  * Phase 3.2 — Human Reviewer Portal sign-in.
  *
- * Credentials are checked by `POST /login` against the seeded reviewer account;
- * the returned mock session is persisted (localStorage via the case-persistence
- * provider) and surfaced as a reviewer badge in every view's top navigation.
+ * Credentials are checked by `POST /login` against the seeded reviewer account.
+ * The reviewer session is in-memory only, so a fresh reload always returns to
+ * this page for an explicit sign-in.
  */
 export default function Login() {
   const navigate = useNavigate();
@@ -118,13 +118,6 @@ export default function Login() {
           <span className="font-mono">admin2026</span>
         </p>
 
-        <button
-          type="button"
-          onClick={() => navigate("/")}
-          className="mt-3 w-full text-center text-[11px] text-muted-foreground underline-offset-2 hover:underline"
-        >
-          Continue to the live arbitration demo without signing in
-        </button>
       </div>
     </div>
   );

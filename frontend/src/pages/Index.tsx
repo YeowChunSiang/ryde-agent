@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, Cpu, Play, RotateCcw, Server } from "lucide-react";
 
 import type {
@@ -35,6 +35,7 @@ import { useCaseStore } from "@/components/CasePersistenceContext";
 import { titleCase } from "@/components/agent-meta";
 
 export default function Index() {
+  const navigate = useNavigate();
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -63,8 +64,14 @@ export default function Index() {
     recordsRef.current = records;
   }, [records]);
 
+  // --- auth gate ---------------------------------------------------------
+  useEffect(() => {
+    if (!session) navigate("/login", { replace: true });
+  }, [session, navigate]);
+
   // --- bootstrap ---------------------------------------------------------
   useEffect(() => {
+    if (!session) return;
     fetchHealth()
       .then(setHealth)
       .catch(() => setHealth(null));
@@ -86,7 +93,7 @@ export default function Index() {
       .catch(() => setLibrary(null));
 
     return () => cleanupRef.current?.();
-  }, [params]);
+  }, [params, session]);
 
   /**
    * Phase 3.2 — restore a completed decision straight from the cache instead
@@ -144,6 +151,8 @@ export default function Index() {
 
   const activeCase = cases.find((c) => c.case_id === selected) ?? null;
   const cached = Boolean(selected && records[selected]?.result);
+
+  if (!session) return null;
 
   // --- run arbitration ---------------------------------------------------
   const run = async () => {
@@ -344,8 +353,6 @@ export default function Index() {
                     <EvidencePanel
                       evidence={result?.evidence ?? null}
                       vision={result?.vision ?? []}
-                      caseId={selected}
-                      disabled={streaming}
                       assets={activeCase?.evidence_assets ?? []}
                     />
                   </TabsContent>
