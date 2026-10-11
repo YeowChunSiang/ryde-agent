@@ -219,8 +219,11 @@ export function CasePersistenceProvider({ children }: { children: ReactNode }) {
       const next = { ...prev };
       for (const caseId of caseIds) {
         const existing = next[caseId];
-        // Never downgrade a ticket that already has a decision or an audit trail.
-        if (existing?.result || existing?.review) continue;
+        // Never downgrade a ticket that already has a decision.
+        // Cases with a review but no result (e.g. pre-seeded historical baselines)
+        // are still eligible so the arbitration verdict is available when a
+        // reviewer opens them.
+        if (existing?.result) continue;
         next[caseId] = {
           case_id: caseId,
           run_id: existing?.run_id ?? null,

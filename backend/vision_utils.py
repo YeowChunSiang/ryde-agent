@@ -63,51 +63,79 @@ def backend_name() -> str:
 
 
 def probe(path: Path) -> dict:
-    """Return ffprobe metadata for a video file (duration, fps, size)."""
+    """Return video metadata (duration, fps, size) via ffprobe or OpenCV."""
     if not path.exists():
         raise VideoProcessingError(f"video not found: {path}")
-    exe = shutil.which("ffprobe")
-    if exe is None:
-        raise VideoProcessingError("ffprobe is not available on this host")
-    try:
-        out = subprocess.run(
-            [
-                exe,
-                "-v",
-                "quiet",
-                "-print_format",
-                "json",
-                "-show_format",
-                "-show_streams",
-                str(path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:  # pragma: no cover - hostile inputs
-        raise VideoProcessingError(f"ffprobe timed out on {path.name}") from exc
-    if out.returncode != 0:
-        raise VideoProcessingError(f"ffprobe failed on {path.name}: {out.stderr.strip()[:200]}")
-    try:
-        data = json.loads(out.stdout or "{}")
-    except json.JSONDecodeError as exc:
-        raise VideoProcessingError(f"ffprobe returned unparseable metadata: {exc}") from exc
 
-    stream = next(
-        (s for s in data.get("streams", []) if s.get("codec_type") == "video"),
-        data.get("streams", [{}])[0] if data.get("streams") else {},
+    # Prefer ffprobe when available
+    exe = shutil.which("ffprobe")
+    if exe is not None:
+        try:
+            out = subprocess.run(
+                [
+                    exe,
+                    "-v",
+                    "quiet",
+                    "-print_format",
+                    "json",
+                    "-show_format",
+                    "-show_streams",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:  # pragma: no cover - hostile inputs
+            raise VideoProcessingError(f"ffprobe timed out on {path.name}") from exc
+        if out.returncode == 0:
+            try:
+                data = json.loads(out.stdout or "{}")
+            except json.JSONDecodeError as exc:
+                raise VideoProcessingError(f"ffprobe returned unparseable metadata: {exc}") from exc
+
+            stream = next(
+                (s for s in data.get("streams", []) if s.get("codec_type") == "video"),
+                data.get("streams", [{}])[0] if data.get("streams") else {},
+            )
+            duration = _to_float(stream.get("duration")) or _to_float(data.get("format", {}).get("duration"))
+            fps = _parse_fps(stream.get("r_frame_rate") or stream.get("avg_frame_rate"))
+            return {
+                "duration_s": float(duration or 0.0),
+                "fps": fps,
+                "width": int(stream.get("width") or 0) or None,
+                "height": int(stream.get("height") or 0) or None,
+                "codec": stream.get("codec_name"),
+            }
+
+    # Fallback to OpenCV so the demo works without ffprobe installed
+    if opencv_available():
+        try:
+            import cv2  # type: ignore
+
+            cap = cv2.VideoCapture(str(path))
+            if not cap.isOpened():
+                raise VideoProcessingError(f"cannot open video: {path.name}")
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            duration = frame_count / fps if fps else 0.0
+            cap.release()
+            return {
+                "duration_s": float(duration or 0.0),
+                "fps": float(fps) if fps else None,
+                "width": width if width > 0 else None,
+                "height": height if height > 0 else None,
+                "codec": None,
+            }
+        except Exception as exc:
+            raise VideoProcessingError(f"video probe failed on {path.name}: {exc}") from exc
+
+    raise VideoProcessingError(
+        "no video probe backend available (install ffmpeg or opencv-python)"
     )
-    duration = _to_float(stream.get("duration")) or _to_float(data.get("format", {}).get("duration"))
-    fps = _parse_fps(stream.get("r_frame_rate") or stream.get("avg_frame_rate"))
-    return {
-        "duration_s": float(duration or 0.0),
-        "fps": fps,
-        "width": int(stream.get("width") or 0) or None,
-        "height": int(stream.get("height") or 0) or None,
-        "codec": stream.get("codec_name"),
-    }
 
 
 def _to_float(value: object) -> Optional[float]:

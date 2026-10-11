@@ -196,11 +196,12 @@ export default function Dashboard() {
     if (!session || !cases.length || autoStartedRef.current) return;
     autoStartedRef.current = true;
 
-    const incoming = cases.filter((c) => c.intake === "incoming").map((c) => c.case_id);
-    const todo = incoming.filter((caseId) => {
-      const rec = recordsRef.current[caseId];
-      return !rec?.result && rec?.status !== "processing";
-    });
+    const todo = cases
+      .filter((c) => {
+        const rec = recordsRef.current[c.case_id];
+        return !rec?.result && rec?.status !== "processing";
+      })
+      .map((c) => c.case_id);
     if (!todo.length) return;
 
     markPending(todo);

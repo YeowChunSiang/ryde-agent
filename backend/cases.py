@@ -251,10 +251,10 @@ DISP_003: dict[str, Any] = {
         "filed_by": "rider",
         "dispute_type": "property_damage",
         "description": (
-            "The driver is claiming a $60 cleaning fee saying I spilled bubble tea in his car. "
-            "I had no drinks with me at all — I was carrying a sealed umbrella and a laptop bag. "
-            "The photo he uploaded looks fake and was clearly taken long after the trip ended. "
-            "I refuse to pay this."
+            "The driver is claiming a $60 cleaning fee saying I left the back seat dirty. "
+            "I made sure the seat was clean when I left — I was carrying a sealed umbrella and a laptop bag, "
+            "nothing that could soil the seat. The photo he uploaded clearly shows a perfectly clean back seat "
+            "with no stains or dirt at all. I refuse to pay this."
         ),
         "filed_at": "2026-09-15T10:12:00+08:00",
         "status": "open",
@@ -302,16 +302,16 @@ DISP_003: dict[str, Any] = {
         {"timestamp": "2026-09-14T22:15:00+08:00", "lat": 1.3545, "lng": 103.9432, "speed_kmh": 0, "status": "completed"},
     ],
     "chat_logs": [
-        {"timestamp": "2026-09-14T22:31:00+08:00", "sender": "driver", "type": "message", "content": "Your drink spilled all over my back seat, I am claiming the $60 cleaning fee."},
-        {"timestamp": "2026-09-14T22:44:00+08:00", "sender": "rider", "type": "message", "content": "I had no drink with me. Please send a photo."},
-        {"timestamp": "2026-09-14T23:45:00+08:00", "sender": "driver", "type": "message", "content": "Sent photos of the rear seat, the stain is very obvious."},
-        {"timestamp": "2026-09-15T09:58:00+08:00", "sender": "rider", "type": "message", "content": "That photo was taken almost an hour and a half after my trip and looks AI generated. I am disputing it."},
+        {"timestamp": "2026-09-14T22:31:00+08:00", "sender": "driver", "type": "message", "content": "You left the back seat dirty, I am claiming the $60 cleaning fee."},
+        {"timestamp": "2026-09-14T22:44:00+08:00", "sender": "rider", "type": "message", "content": "The seat was clean when I left. Please send a photo."},
+        {"timestamp": "2026-09-14T23:45:00+08:00", "sender": "driver", "type": "message", "content": "Sent photos of the rear seat, the dirt is very obvious."},
+        {"timestamp": "2026-09-15T09:58:00+08:00", "sender": "rider", "type": "message", "content": "That photo was taken almost an hour and a half after my trip and the seat looks completely clean. I am disputing it."},
     ],
     "app_events": [
         {"timestamp": "2026-09-14T22:15:00+08:00", "event_type": "trip_completed", "details": "Trip completed. 18.4 km, 33 min. Fare $26.00 charged."},
-        {"timestamp": "2026-09-14T22:31:00+08:00", "event_type": "cleaning_claim_filed", "details": "Driver D-5502 filed a cleaning claim of $60.00 for alleged liquid spill."},
+        {"timestamp": "2026-09-14T22:31:00+08:00", "event_type": "cleaning_claim_filed", "details": "Driver D-5502 filed a cleaning claim of $60.00 for alleged dirty seat."},
         {"timestamp": "2026-09-14T23:46:00+08:00", "event_type": "evidence_uploaded", "details": "Driver uploaded 1 image as evidence (cabin_photo_01.jpg). EXIF capture time 23:41."},
-        {"timestamp": "2026-09-15T10:12:00+08:00", "event_type": "dispute_filed", "details": "Rider disputed the cleaning fee, alleging fabricated evidence."},
+        {"timestamp": "2026-09-15T10:12:00+08:00", "event_type": "dispute_filed", "details": "Rider disputed the cleaning fee, alleging fabricated evidence — photo shows clean seat."},
     ],
     "media_attachments": [
         {
@@ -326,7 +326,7 @@ DISP_003: dict[str, Any] = {
             "gps_lng": 103.9418,
             "exif_present": True,
             "ai_generated_probability": 0.71,
-            "caption": "Rider spilled bubble tea on the rear seat, sticky liquid everywhere",
+            "caption": "Alleged dirty rear seat — image shows a perfectly clean back seat with no stains",
         }
     ],
     "cancellation_policy": {
