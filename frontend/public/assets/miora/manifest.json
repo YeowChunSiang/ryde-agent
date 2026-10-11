@@ -1,13 +1,13 @@
 {
   "generator": "scripts/generate_mock_assets.py",
-  "note": "Assets are locally rendered stand-ins for Tencent Miora output. Replace any file with a real Miora render of the recorded prompt \u2014 the UI references them by name.",
+  "note": "Assets are locally rendered stand-ins for Tencent Miora output. Replace any file with a real Miora render of the recorded prompt \u2014 the UI references them by name. The generator skips any file that already exists, so hand-supplied Miora renders survive re-running the script.",
   "assets": {
     "disp001_route_deviation.png": "A high-fidelity UI mockup of a ride-hailing app map on a smartphone. The map shows a straight-line suggested route in blue, but the actual GPS track taken by the car is in red, showing a wildly inefficient looping path through dense city traffic.",
     "disp002_no_show_chat.png": "A UI mockup of a ride-hailing chat screen. The driver has sent three messages saying 'I am at the lobby' and 'Waiting for 5 minutes', with no replies from the passenger. A prominent digital wait-timer overlay displays '08:00 elapsed'.",
     "disp004_genuine_spill.png": "A realistic smartphone photo of the back seat of a Honda HR-V. A large, wet coffee spill is soaking into the fabric seat. The photo has a visible digital timestamp overlay reading '2026-09-13 09:15 AM' to match the trip completion time.",
     "disp003_fake_spill.png": "An AI-generated, slightly unrealistic image of french fries and ketchup scattered on a car seat, with subtle visual artifacts and missing EXIF data, simulating a fraudulent 'vomit fraud' cleaning fee claim.",
-    "disp006_dashcam.png": "Interior dashcam footage from a ride-hailing vehicle. The driver is turned around, aggressively gesturing toward the back seat. A dashboard clock reads '11:45 PM'.",
-    "disp007_poster.png": "Poster frame of a short cabin-camera clip: bubble tea soaking into the rear bench seat of a Honda HR-V, captured seconds after dropoff.",
+    "disp006_arguement.mp3": "An 8-second covert in-cabin audio recording of a heated verbal argument. The rider politely asks the driver to lower the air-conditioning temperature; the driver shouts back with insults and refuses, escalating into open hostility.",
+    "disp007_harassment.mp4": "A 12-second low-light covert night recording shot from the back seat of a ride-hailing car by a female passenger, in portrait orientation (768x1258). The driver reaches back while driving and makes inappropriate physical contact with her leg.",
     "agents/<role>.png": "Flat vector avatar for a dispute-resolution AI agent: rounded square badge, gradient background in the agent's accent colour, three-letter monogram, thin white ring."
   },
   "agent_avatars": {

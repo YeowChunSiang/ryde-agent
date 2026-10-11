@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Cpu, Play, Server } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { AlertCircle, Cpu, Play, RotateCcw, Server } from "lucide-react";
 
 import type {
   AgentEvent,
+  ApprovalAccepted,
   CaseSummary,
   Health,
+  OverrideAccepted,
   PrecedentCase,
   ResolutionResult,
 } from "@/types";
@@ -27,6 +30,8 @@ import { AdvocatesPanel } from "@/components/AdvocatesPanel";
 import { VerdictPanel } from "@/components/VerdictPanel";
 import { RiskPanel } from "@/components/RiskPanel";
 import { EscalationPanel } from "@/components/EscalationPanel";
+import { ReviewerNav } from "@/components/ReviewerNav";
+import { useCaseStore } from "@/components/CasePersistenceContext";
 import { titleCase } from "@/components/agent-meta";
 
 export default function Index() {
@@ -39,8 +44,24 @@ export default function Index() {
   const [tab, setTab] = useState("verdict");
   const [error, setError] = useState<string | null>(null);
   const [library, setLibrary] = useState<PrecedentCase[] | null>(null);
+  const [params] = useSearchParams();
+
+  const {
+    records,
+    session,
+    beginRun,
+    appendEvent,
+    completeRun,
+    failRun,
+    recordApproval,
+    recordOverride,
+  } = useCaseStore();
 
   const cleanupRef = useRef<(() => void) | null>(null);
+  const recordsRef = useRef(records);
+  useEffect(() => {
+    recordsRef.current = records;
+  }, [records]);
 
   // --- bootstrap ---------------------------------------------------------
   useEffect(() => {
@@ -50,7 +71,14 @@ export default function Index() {
     fetchCases()
       .then((list) => {
         setCases(list);
-        if (list.length) setSelected(list[1]?.case_id ?? list[0].case_id);
+        if (!list.length) return;
+        // The reviewer board deep-links here with `?case=DISP-007`.
+        const requested = params.get("case");
+        const initial =
+          (requested && list.find((c) => c.case_id === requested)?.case_id) ??
+          list[1]?.case_id ??
+          list[0].case_id;
+        setSelected(initial);
       })
       .catch((err) => setError(String(err)));
     fetchPrecedents()
@@ -58,21 +86,64 @@ export default function Index() {
       .catch(() => setLibrary(null));
 
     return () => cleanupRef.current?.();
+  }, [params]);
+
+  /**
+   * Phase 3.2 — restore a completed decision straight from the cache instead
+   * of spending another arbitration round trip on it.
+   */
+  const restore = useCallback((caseId: string) => {
+    const record = recordsRef.current[caseId];
+    setEvents(record?.events ?? []);
+    setResult(record?.result ?? null);
+    setError(record?.error ?? null);
   }, []);
+
+  useEffect(() => {
+    if (selected) restore(selected);
+    // `restore` is stable; re-running when the cache changes would clobber a
+    // live stream, so this only reacts to case switches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
 
   // A human override writes a new precedent — refresh both the run result and
   // the knowledge base so the learning loop is visible immediately.
-  const onOverridden = async (runId: string) => {
+  const onOverridden = async (runId: string, override: OverrideAccepted, note: string) => {
     try {
       const [fresh, lib] = await Promise.all([fetchResult(runId), fetchPrecedents()]);
       setResult(fresh);
       setLibrary(lib.precedents);
+      if (selected) {
+        recordOverride(
+          selected,
+          override,
+          recordsRef.current[selected]?.result ?? null,
+          session?.reviewer_id ?? "reviewer-01",
+          session?.name ?? "Reviewer",
+          note,
+        );
+      }
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  /** Phase 3.2 — reviewer confirms the ruling; the ticket closes and archives. */
+  const onApproved = async (runId: string, approval: ApprovalAccepted) => {
+    try {
+      const [fresh, lib] = await Promise.all([fetchResult(runId), fetchPrecedents()]);
+      setResult(fresh);
+      setLibrary(lib.precedents);
+      if (selected) {
+        recordApproval(selected, approval, recordsRef.current[selected]?.result ?? null, session?.name ?? "Reviewer");
+      }
     } catch (err) {
       setError(String(err));
     }
   };
 
   const activeCase = cases.find((c) => c.case_id === selected) ?? null;
+  const cached = Boolean(selected && records[selected]?.result);
 
   // --- run arbitration ---------------------------------------------------
   const run = async () => {
@@ -86,14 +157,22 @@ export default function Index() {
 
     try {
       const accepted = await startDispute(selected);
+      beginRun(selected, accepted.run_id);
       cleanupRef.current = subscribeToRun(accepted.run_id, {
-        onEvent: (data) => setEvents((prev) => [...prev, data as unknown as AgentEvent]),
+        onEvent: (data) => {
+          const event = data as unknown as AgentEvent;
+          setEvents((prev) => [...prev, event]);
+          appendEvent(selected, event);
+        },
         onEnd: async () => {
           setStreaming(false);
           setTab("verdict");
           try {
-            setResult(await fetchResult(accepted.run_id));
+            const fresh = await fetchResult(accepted.run_id);
+            setResult(fresh);
+            completeRun(selected, fresh);
           } catch (err) {
+            failRun(selected, String(err));
             setError(`Stream finished but result fetch failed: ${err}`);
           }
         },
@@ -101,6 +180,7 @@ export default function Index() {
       });
     } catch (err) {
       setStreaming(false);
+      if (selected) failRun(selected, String(err));
       setError(String(err));
     }
   };
@@ -109,10 +189,8 @@ export default function Index() {
     if (streaming) return;
     cleanupRef.current?.();
     setSelected(caseId);
-    setEvents([]);
-    setResult(null);
-    setError(null);
     setTab("verdict");
+    restore(caseId);
   };
 
   return (
@@ -175,9 +253,14 @@ export default function Index() {
               frames: {health.video_backend}
             </Badge>
           )}
+          <ReviewerNav />
           <Button onClick={run} disabled={!selected || streaming} size="sm" className="h-8">
-            <Play className="h-3.5 w-3.5" />
-            {streaming ? "Arbitrating…" : "Run Arbitration"}
+            {cached && !streaming ? (
+              <RotateCcw className="h-3.5 w-3.5" />
+            ) : (
+              <Play className="h-3.5 w-3.5" />
+            )}
+            {streaming ? "Arbitrating…" : cached ? "Re-run Arbitration" : "Run Arbitration"}
           </Button>
         </div>
       </header>
@@ -286,7 +369,13 @@ export default function Index() {
                       result={result}
                       threshold={health?.escalation_threshold ?? 0.7}
                     />
-                    <EscalationPanel result={result} onOverridden={onOverridden} />
+                    <EscalationPanel
+                      result={result}
+                      onOverridden={onOverridden}
+                      onApproved={onApproved}
+                      reviewerId={session?.reviewer_id ?? "reviewer-01"}
+                      reviewerName={session?.name ?? "Reviewer"}
+                    />
                   </TabsContent>
                 </div>
               </Tabs>

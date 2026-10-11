@@ -328,9 +328,16 @@ class VideoAnalysis(_Strict):
     frames_extracted: int = 0
     frames: list[VideoFrame] = Field(default_factory=list)
     anomalies: list[str] = Field(default_factory=list)
-    severity: Literal["none", "normal_wear", "minor_mess", "liquid_spill", "major_damage"] = (
-        "none"
-    )
+    #: ``conduct_violation`` is the safety ladder: a clip showing physical
+    #: boundary violation rather than cabin damage.
+    severity: Literal[
+        "none",
+        "normal_wear",
+        "minor_mess",
+        "liquid_spill",
+        "major_damage",
+        "conduct_violation",
+    ] = "none"
     reasoning: str = ""
     engine: Literal["ffmpeg", "opencv", "unavailable"] = "ffmpeg"
 
@@ -388,6 +395,10 @@ class DisputeCase(_Domain):
         default=None,
         description="Set by the caller to override triage; otherwise derived from dispute type",
     )
+    sla_priority_reason: Optional[str] = Field(
+        default=None,
+        description="Why intake pinned this band — echoed into the routing decision",
+    )
     routing_status: RoutingStatus = Field(
         default=RoutingStatus.QUEUED,
         description="Lifecycle position assigned by the SLA & Routing Manager",
@@ -395,6 +406,19 @@ class DisputeCase(_Domain):
     sla_due_at: Optional[datetime] = Field(
         default=None, description="Resolution deadline derived from the priority band"
     )
+
+    # --- Reviewer portal (Phase 3.2) ---------------------------------------
+    #: Money at stake. Drives the secondary sort of the reviewer queue.
+    financial_value: float = Field(default=0.0, ge=0)
+    financial_note: Optional[str] = Field(
+        default=None, description="Human label for `financial_value` (e.g. 'cleaning fee claimed')"
+    )
+    #: ``incoming`` tickets land in the active queue; ``historical`` ones are
+    #: carried over from a previous resolution cycle and shown in the History tab.
+    intake: Literal["incoming", "historical"] = "incoming"
+    #: Immediate actions the escalation protocol must hand the reviewer for
+    #: this ticket (suspension, safety ticket, law-enforcement referral, ...).
+    escalation_directives: list[str] = Field(default_factory=list)
 
     @property
     def dispute_id(self) -> str:
@@ -592,6 +616,55 @@ class OverrideAccepted(_Strict):
 
 
 # ---------------------------------------------------------------------------
+# Reviewer portal (Phase 3.2): authentication + approval
+# ---------------------------------------------------------------------------
+
+
+class LoginRequest(_Strict):
+    """Credentials posted by the Human Reviewer Portal login screen."""
+
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=1)
+
+
+class LoginAccepted(_Strict):
+    """Mock session handed back to the portal.
+
+    The hackathon build has no identity provider, so the session is a signed-by-
+    convention token the frontend persists. Swapping in Ryde SSO means replacing
+    only this endpoint.
+    """
+
+    token: str
+    reviewer_id: str
+    name: str
+    role: str = "dispute_reviewer"
+    issued_at: datetime = Field(default_factory=_utcnow)
+
+
+class ApproveRequest(_Strict):
+    """Reviewer confirms the agent ruling and closes the dispute."""
+
+    reviewer_id: str = Field(min_length=1)
+    note: str = Field(default="", description="Optional human verification note")
+
+
+class ApprovalAccepted(_Strict):
+    """Audit record for an approval — the ticket's closing entry."""
+
+    run_id: str
+    dispute_id: str
+    status: Literal["human_verified"] = "human_verified"
+    decision: Optional[str] = None
+    amount: float = 0.0
+    reviewer_id: str
+    note: str = ""
+    verified_at: datetime = Field(default_factory=_utcnow)
+    knowledge_base_size: int = 0
+    message: str = ""
+
+
+# ---------------------------------------------------------------------------
 # Agent outputs
 # ---------------------------------------------------------------------------
 
@@ -604,7 +677,14 @@ class VisionFinding(_Strict):
     authenticity_confidence: float = Field(default=0.0, ge=0, le=1)
     ai_generated_probability: Optional[float] = None
     exif_timestamp_delta_min: Optional[float] = None
-    severity: Literal["none", "normal_wear", "minor_mess", "liquid_spill", "major_damage"] = "none"
+    severity: Literal[
+        "none",
+        "normal_wear",
+        "minor_mess",
+        "liquid_spill",
+        "major_damage",
+        "conduct_violation",
+    ] = "none"
     anomalies: list[str] = Field(default_factory=list)
     reasoning: str = ""
 
@@ -676,6 +756,9 @@ class ResolutionResult(_Strict):
     ruling: Optional[Ruling] = None
     escalation: Optional[EscalationPacket] = None
     override: Optional[OverrideAccepted] = None
+    #: Phase 3.2: set when a reviewer *approves* the ruling instead of
+    #: overriding it — the audit trail needs both outcomes.
+    approval: Optional[ApprovalAccepted] = None
     started_at: datetime = Field(default_factory=_utcnow)
     finished_at: Optional[datetime] = None
     duration_ms: Optional[int] = None
@@ -725,6 +808,19 @@ class CaseSummary(_Strict):
     blurb: str
     expected_ruling: str
     filed_by: str
+    #: Ticket creation timestamp (ISO8601) used for queue aging heuristics.
+    filed_at: str
     multimodal: bool
     #: Miora-generated mock evidence rendered by the UI (Phase 3)
     evidence_assets: list[str] = Field(default_factory=list)
+    # --- Phase 3.2: reviewer queue metadata --------------------------------
+    #: Money at stake — the secondary sort key of the reviewer queue.
+    financial_value: float = 0.0
+    financial_note: Optional[str] = None
+    #: ``historical`` tickets are seeded straight into the History tab.
+    intake: Literal["incoming", "historical"] = "incoming"
+    #: Triage band the SLA & Routing Manager will assign, exposed so the queue
+    #: can be ordered *before* arbitration has run.
+    sla_priority: Optional[SLAPriority] = None
+    #: Media type of the primary attachment, for the queue's evidence column.
+    evidence_kind: Optional[str] = None

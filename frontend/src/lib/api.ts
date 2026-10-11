@@ -1,7 +1,10 @@
 import type {
+  ApprovalAccepted,
+  ApproveRequest,
   CaseSummary,
   DisputeAccepted,
   Health,
+  LoginAccepted,
   MediaUploadResult,
   OverrideAccepted,
   OverrideRequest,
@@ -67,6 +70,37 @@ export async function submitOverride(
   payload: OverrideRequest,
 ): Promise<OverrideAccepted> {
   return postJSON<OverrideAccepted>(`/override/${runId}`, payload);
+}
+
+/**
+ * Phase 3.2 — Reviewer Portal sign-in against the mock identity provider.
+ * Rejects with a human-readable message on 401 so the login screen can render
+ * it verbatim.
+ */
+export async function login(email: string, password: string): Promise<LoginAccepted> {
+  const res = await fetch(`${BASE}/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (res.status === 401) {
+    throw new Error("Invalid reviewer credentials.");
+  }
+  if (!res.ok) {
+    throw new Error(`Sign-in failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as LoginAccepted;
+}
+
+/**
+ * Phase 3.2 — reviewer confirms the agent ruling and closes the ticket.
+ * Approving does *not* write a precedent: only corrections teach the system.
+ */
+export async function submitApproval(
+  runId: string,
+  payload: ApproveRequest,
+): Promise<ApprovalAccepted> {
+  return postJSON<ApprovalAccepted>(`/approve/${runId}`, payload);
 }
 
 export async function fetchPrecedents(): Promise<PrecedentLibrary> {

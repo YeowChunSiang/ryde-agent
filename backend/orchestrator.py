@@ -51,6 +51,7 @@ from models import (
     AdvocateArgument,
     AgentEvent,
     AgentRole,
+    ApproveRequest,
     Decision,
     DisputeCase,
     DisputeStatus,
@@ -242,6 +243,58 @@ class Orchestrator:
             ),
             level=EventLevel.RULING,
             payload=run.result.override.model_dump(mode="json"),
+        )
+        return run.result
+
+    async def apply_approval(
+        self, run_id: str, request: ApproveRequest
+    ) -> Optional[ResolutionResult]:
+        """Record a reviewer's approval of the agent ruling (Phase 3.2).
+
+        Approving closes the ticket and writes the verification into the audit
+        trail. Unlike an override it does *not* inject a new precedent: the
+        knowledge base only learns from decisions that correct the agents, so
+        confirming a ruling would otherwise teach the system nothing new.
+        """
+        run = self.broker.get(run_id)
+        if run is None:
+            return None
+
+        from models import ApprovalAccepted  # local import: avoids a cycle at import time
+
+        ruling = run.result.ruling
+        decision = ruling.decision.value if ruling is not None else None
+        amount = ruling.amount if ruling is not None else 0.0
+
+        approval = ApprovalAccepted(
+            run_id=run_id,
+            dispute_id=run.case.dispute_id,
+            decision=decision,
+            amount=amount,
+            reviewer_id=request.reviewer_id,
+            note=request.note.strip(),
+            knowledge_base_size=self.knowledge_base_size,
+            message=(
+                f"Ruling verified by {request.reviewer_id} and the dispute closed. "
+                f"Knowledge base unchanged at {self.knowledge_base_size} precedents."
+            ),
+        )
+        run.result.approval = approval
+        if ruling is not None:
+            ruling.escalated = False
+            ruling.escalation_reason = None
+        run.case.routing_status = RoutingStatus.AUTO_RESOLVED
+        run.result.status = DisputeStatus.RESOLVED
+
+        await run.emit(
+            AgentRole.LEARNING,
+            "approval_applied",
+            f"Human verification: reviewer {request.reviewer_id} approved the ruling "
+            f"{(decision or '').replace('_', ' ')}"
+            + (f" (S${amount:.2f})" if amount else "")
+            + ". Dispute closed without changing the knowledge base.",
+            level=EventLevel.RULING,
+            payload=approval.model_dump(mode="json"),
         )
         return run.result
 

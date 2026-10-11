@@ -1,9 +1,10 @@
-import { ImageIcon, Loader2 } from "lucide-react";
+import { CheckCircle2, ImageIcon, Loader2 } from "lucide-react";
 
 import type { CaseSummary } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { titleCase } from "./agent-meta";
+import { useCaseStore } from "@/components/CasePersistenceContext";
+import { PRIORITY_META, titleCase } from "./agent-meta";
 
 interface Props {
   cases: CaseSummary[];
@@ -13,7 +14,9 @@ interface Props {
 }
 
 export function CaseRail({ cases, selected, onSelect, disabled }: Props) {
+  const { records } = useCaseStore();
   const categories = new Set(cases.map((c) => c.dispute_type)).size;
+  const cachedCount = cases.filter((c) => Boolean(records[c.case_id]?.result)).length;
   return (
     <nav className="flex h-full min-h-0 flex-col">
       <div className="border-b border-border px-4 py-3">
@@ -21,11 +24,15 @@ export function CaseRail({ cases, selected, onSelect, disabled }: Props) {
         <p className="mt-0.5 text-xs text-muted-foreground">
           {cases.length} sample dossiers · {categories} categories
         </p>
+        <p className="mt-0.5 text-[10px] text-muted-foreground">
+          {cachedCount} cached — restored instantly, no re-run
+        </p>
       </div>
 
       <ul className="min-h-0 flex-1 overflow-y-auto p-2">
         {cases.map((c) => {
           const active = c.case_id === selected;
+          const cached = Boolean(records[c.case_id]?.result);
           return (
             <li key={c.case_id}>
               <button
@@ -50,6 +57,23 @@ export function CaseRail({ cases, selected, onSelect, disabled }: Props) {
                   </Badge>
                   {c.multimodal && (
                     <ImageIcon className="h-3 w-3 shrink-0 text-fuchsia-400" aria-label="has media" />
+                  )}
+                  {c.sla_priority && (
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "ml-auto h-4 px-1 text-[10px] font-semibold",
+                        PRIORITY_META[c.sla_priority].className,
+                      )}
+                    >
+                      {PRIORITY_META[c.sla_priority].label}
+                    </Badge>
+                  )}
+                  {cached && (
+                    <CheckCircle2
+                      className="h-3 w-3 shrink-0 text-emerald-400"
+                      aria-label="cached decision"
+                    />
                   )}
                 </div>
                 <p className="mt-1 whitespace-normal break-words text-xs font-medium leading-relaxed">

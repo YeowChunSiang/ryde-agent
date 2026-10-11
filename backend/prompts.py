@@ -86,7 +86,11 @@ VISION_JSON_CONTRACT = {
     "authenticity_confidence": "number 0..1",
     "ai_generated_probability": "number 0..1",
     "exif_timestamp_delta_min": "number (signed minutes from trip end; null if unknown)",
-    "severity": "one of: none | normal_wear | minor_mess | liquid_spill | major_damage",
+    "severity": (
+        "one of: none | normal_wear | minor_mess | liquid_spill | major_damage | "
+        "conduct_violation (use conduct_violation when the media evidences a physical "
+        "boundary violation / harassment rather than cabin damage)"
+    ),
     "anomalies": ["string"],
     "reasoning": "string (2-4 sentences)",
 }

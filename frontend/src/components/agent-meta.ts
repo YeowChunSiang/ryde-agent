@@ -147,6 +147,34 @@ export const PRIORITY_META: Record<SLAPriority, { label: string; className: stri
   low: { label: "LOW", className: "bg-slate-500/15 text-slate-300 border-slate-500/40" },
 };
 
+/**
+ * Phase 3.2: the Reviewer Portal queue ranks on the Ops label for each triage
+ * band — the SLA router's `normal` band is what reviewers call `MEDIUM`.
+ */
+export const QUEUE_PRIORITY_LABEL: Record<SLAPriority, string> = {
+  critical: "CRITICAL",
+  high: "HIGH",
+  normal: "MEDIUM",
+  low: "LOW",
+};
+
+/** Sort weight — lower sorts first (CRITICAL > HIGH > MEDIUM > LOW). */
+export const QUEUE_PRIORITY_RANK: Record<SLAPriority, number> = {
+  critical: 0,
+  high: 1,
+  normal: 2,
+  low: 3,
+};
+
+export function priorityLabel(priority: SLAPriority | null | undefined): string {
+  return priority ? QUEUE_PRIORITY_LABEL[priority] : "UNTRIAGED";
+}
+
+export function decisionLabel(decision: string | null | undefined): string {
+  if (!decision) return "—";
+  return DECISION_META[decision as Decision]?.label ?? titleCase(decision);
+}
+
 export const ROUTING_META: Record<RoutingStatus, { label: string; className: string }> = {
   queued: { label: "queued", className: "bg-zinc-500/15 text-zinc-300 border-zinc-500/40" },
   fast_tracked: {

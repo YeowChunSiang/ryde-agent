@@ -615,7 +615,15 @@ class OfflineReasoner:
         anomalies.extend(analysis.anomalies if analysis else [])
 
         caption = (attachment.caption or "").lower()
-        if any(k in caption for k in ("spill", "drink", "liquid", "bubble tea", "coffee", "mess")):
+        # Phase 3.2: a clip can evidence a *conduct* violation rather than cabin
+        # damage. Those keywords are checked first — classifying a harassment
+        # recording as "minor_mess" would be both wrong and insulting.
+        if any(
+            k in caption
+            for k in ("harass", "touch", "thigh", "grop", "reaches back", "reached back", "boundary")
+        ):
+            severity = "conduct_violation"
+        elif any(k in caption for k in ("spill", "drink", "liquid", "bubble tea", "coffee", "mess")):
             severity = "liquid_spill"
         elif any(k in caption for k in ("damage", "torn", "broken", "vomit")):
             severity = "major_damage"
@@ -628,13 +636,20 @@ class OfflineReasoner:
         if not genuine:
             anomalies.append("Video marked inadmissible — excluded from the ruling")
 
-        reasoning = (
-            f"{frames} keyframe(s) sampled across {analysis.duration_s:.1f}s of footage; "
-            "timestamps align with the trip window and the frames passed the synthetic-media "
-            "screen, so the sequence is admissible."
-            if genuine and analysis
-            else "The clip fails forensic validation: " + "; ".join(anomalies[:2]) + "."
-        )
+        if genuine and analysis:
+            reasoning = (
+                f"{frames} keyframe(s) sampled across {analysis.duration_s:.1f}s of footage; "
+                "timestamps align with the trip window and the frames passed the synthetic-media "
+                "screen, so the sequence is admissible."
+            )
+            if severity == "conduct_violation":
+                reasoning += (
+                    " The frames show a physical boundary violation inside the cabin; the clip is "
+                    "admissible and must be reviewed by a human under policy SAFETY-2 — no "
+                    "autonomous ruling is permitted on a sexual-harassment allegation."
+                )
+        else:
+            reasoning = "The clip fails forensic validation: " + "; ".join(anomalies[:2]) + "."
         # Keep the embedded VideoAnalysis in sync with the agent's verdict so the
         # frontend and the judge read the same severity from one place.
         if analysis is not None:

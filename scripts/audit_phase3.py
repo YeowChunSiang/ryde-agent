@@ -211,10 +211,15 @@ EXPECTED_PROMPTS = {
         "ketchup",
         "missing EXIF",
     ),
-    "disp006_dashcam.png": (
-        "dashcam",
-        "aggressively gesturing",
-        "11:45 PM",
+    "disp006_arguement.mp3": (
+        "audio recording",
+        "air-conditioning",
+        "hostility",
+    ),
+    "disp007_harassment.mp4": (
+        "back seat",
+        "low-light",
+        "physical contact",
     ),
 }
 for fname, needles in EXPECTED_PROMPTS.items():
@@ -241,8 +246,12 @@ check(
     "disp003_fake_spill.png" in cases_src and "disp004_genuine_spill.png" in cases_src,
 )
 check(
-    "cases.py binds Miora assets for safety_incident (DISP-006 dashcam)",
-    "disp006_dashcam.png" in cases_src,
+    "cases.py binds the DISP-006 argument recording",
+    "disp006_arguement.mp3" in cases_src,
+)
+check(
+    "cases.py binds the DISP-007 harassment clip",
+    "disp007_harassment.mp4" in cases_src,
 )
 check(
     "MIORA_ASSETS registry exposed to the UI via /cases",

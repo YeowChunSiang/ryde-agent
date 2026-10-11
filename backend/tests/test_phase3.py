@@ -108,10 +108,10 @@ def test_simulated_asr_transcribes_the_scripted_argument(settings):
     transcript = asyncio.run(provider.transcribe(att))
 
     assert transcript.attachment_id == att.attachment_id
-    assert len(transcript.segments) == 5
+    assert len(transcript.segments) == 4
     assert transcript.threat_detected is True
     assert transcript.hostility_score >= 0.8
-    assert any("where you live" in s.text for s in transcript.segments)
+    assert any("find you after this trip" in s.text.lower() for s in transcript.segments)
     # Turns are laid out end to end across the clip, never overlapping backwards.
     assert transcript.segments[0].start_s == 0.0
     for prev, nxt in zip(transcript.segments, transcript.segments[1:]):
@@ -243,7 +243,7 @@ def test_upload_audio_reads_the_sidecar_script(client, sample_audio):
     assert transcript["engine"] == "simulated"
     assert transcript["threat_detected"] is True
     assert transcript["hostility_score"] >= 0.8
-    assert "i know where you live" in transcript["full_text"].lower()
+    assert "find you after this trip" in transcript["full_text"].lower()
 
 
 def test_sidecar_script_is_found_next_to_or_below_the_recording(settings, tmp_path):
@@ -347,13 +347,20 @@ def test_repeated_recordings_produce_one_policy_check_each():
     assert "SAFETY-2" in refs
 
 
-def test_audio_pipeline_escalates_the_safety_case(client):
-    """Prompt3 test 1: ASR transcribes the threat and the judge escalates."""
+def test_audio_pipeline_escalates_the_verbal_altercation(client):
+    """prompt3.2 §1: DISP-006 is the AC-temperature argument on tape.
+
+    ASR transcribes the shouting and the threat, the SLA router pins the ticket
+    at ``HIGH`` (fast-tracked into the priority queue), and the judge escalates
+    while recommending an apology note, a driver reprimand and a goodwill
+    voucher.
+    """
     r = _resolve(client, "DISP-006")
 
     assert r["status"] == "escalated"
-    assert r["routing"]["priority"] == "critical"
-    assert r["routing"]["queue"] == "safety_escalations"
+    assert r["routing"]["priority"] == "high"
+    assert r["routing"]["queue"] == "priority_resolution"
+    assert r["routing"]["fast_tracked"] is True
 
     audio = [v for v in r["vision"] if v["media_kind"] == "audio"]
     assert audio, "no audio finding was produced"
@@ -361,8 +368,8 @@ def test_audio_pipeline_escalates_the_safety_case(client):
     assert transcript["engine"] == "simulated"
     assert transcript["threat_detected"] is True
     assert transcript["hostility_score"] >= 0.8
-    assert len(transcript["segments"]) == 5
-    assert transcript["source_url"]
+    assert len(transcript["segments"]) == 4
+    assert transcript["source_url"].endswith("disp006_arguement.mp3")
 
     # The transcript reached the fact table...
     keys = {f["key"] for f in r["evidence"]["facts"]}
@@ -379,23 +386,42 @@ def test_audio_pipeline_escalates_the_safety_case(client):
     assert any("TRTC ASR" in k for k in r["ruling"]["key_findings"])
     assert r["escalation"] is not None
 
+    # prompt3.2: the escalation packet leads with the conduct remedies the
+    # reviewer is expected to apply.
+    focus = " ".join(r["escalation"]["recommended_focus"]).lower()
+    assert "apolog" in focus
+    assert "reprimand" in focus or "warning" in focus
+    assert "voucher" in focus
 
-def test_video_pipeline_extracts_frames_and_cites_them(client):
-    """Prompt3 test 2: frames are extracted and the ruling cites visual evidence."""
+
+def test_video_pipeline_flags_the_harassment_recording(client):
+    """prompt3.2 §1: DISP-007 is the back-seat harassment clip.
+
+    Keyframes are sampled at 1 fps, the Vision Agent reports a
+    ``conduct_violation`` on low-light footage, the SLA router assigns
+    ``CRITICAL`` and the Escalation Protocol fires immediately.
+    """
     r = _resolve(client, "DISP-007")
 
-    assert r["status"] == "resolved"
+    assert r["dispute_type"] == "safety_incident"
+    assert r["status"] == "escalated"
+    assert r["routing"]["priority"] == "critical"
+    assert r["routing"]["queue"] == "safety_escalations"
+    assert r["routing"]["queue_position"] == 1
+
     video = [v for v in r["vision"] if v["media_kind"] == "video"]
     assert video, "no video finding was produced"
     analysis = video[0]["video"]
 
     assert analysis["frames_extracted"] >= 5
-    assert analysis["duration_s"] == pytest.approx(6.0, abs=0.5)
+    assert analysis["duration_s"] == pytest.approx(12.27, abs=0.8)
     assert analysis["engine"] in {"ffmpeg", "opencv"}
-    assert analysis["source_url"]
+    assert analysis["source_url"].endswith("disp007_harassment.mp4")
     assert len(analysis["frames"]) == analysis["frames_extracted"]
     # No timeout / decode failure surfaced as an anomaly.
     assert not any("decoded" in a for a in analysis["anomalies"])
+    # ...but the low-light capture is called out, because it limits detail.
+    assert any("dark" in a.lower() or "low-light" in a.lower() for a in analysis["anomalies"])
 
     # Keyframes are reachable over HTTP, so the UI never renders a broken strip.
     for frame in analysis["frames"][:3]:
@@ -404,11 +430,15 @@ def test_video_pipeline_extracts_frames_and_cites_them(client):
     keys = {f["key"] for f in r["evidence"]["facts"]}
     assert any(k.startswith("video_") and k.endswith("_frames") for k in keys)
 
-    assert r["ruling"]["decision"] == "compensate_driver"
-    assert r["ruling"]["amount"] == pytest.approx(60.0)
-    cited = " ".join(r["ruling"]["key_findings"]) + " " + r["ruling"]["reasoning"]
-    assert "keyframe" in cited.lower()
-    assert "liquid_spill" in cited
+    assert video[0]["severity"] == "conduct_violation"
+    assert r["ruling"]["decision"] == "escalate_to_human"
+    assert r["ruling"]["escalated"] is True
+
+    # prompt3.2: the packet demands the three immediate platform actions.
+    focus = " ".join(r["escalation"]["recommended_focus"]).lower()
+    assert "suspend" in focus or "suspension" in focus
+    assert "safety ticket" in focus
+    assert "law enforcement" in focus or "law-enforcement" in focus or "police" in focus
 
 
 # ---------------------------------------------------------------------------
@@ -430,7 +460,49 @@ def test_case_library_exposes_the_new_multimodal_dossiers(client):
     assert {"DISP-006", "DISP-007"} <= ids
     by_id = {c["case_id"]: c for c in body["cases"]}
     assert by_id["DISP-006"]["dispute_type"] == "safety_incident"
-    assert by_id["DISP-007"]["dispute_type"] == "property_damage"
+    assert by_id["DISP-007"]["dispute_type"] == "safety_incident"
+    assert by_id["DISP-006"]["evidence_kind"] == "audio"
+    assert by_id["DISP-007"]["evidence_kind"] == "video"
+
+
+def test_case_library_carries_the_reviewer_queue_metadata(client):
+    """prompt3.2 §3.3: the queue sorts on SLA band then money, before any run."""
+    by_id = {c["case_id"]: c for c in client.get("/cases").json()["cases"]}
+
+    assert by_id["DISP-007"]["sla_priority"] == "critical"
+    assert by_id["DISP-006"]["sla_priority"] == "high"
+    assert by_id["DISP-007"]["financial_value"] == pytest.approx(0.0)
+    assert by_id["DISP-006"]["financial_value"] == pytest.approx(22.0)
+
+    # A balance of carried-over and freshly-intake tickets (prompt3.2 §4.1).
+    intakes = {c["case_id"]: c["intake"] for c in by_id.values()}
+    assert intakes["DISP-001"] == "historical"
+    assert intakes["DISP-007"] == "incoming"
+    assert "historical" in intakes.values()
+    assert "incoming" in intakes.values()
+    for case_id, intake in intakes.items():
+        assert intake in {"historical", "incoming"}, case_id
+        assert isinstance(by_id[case_id]["financial_value"], (int, float)), case_id
+
+
+def test_dossier_media_points_at_the_named_phase32_assets():
+    """prompt3.2 §4.1: the exact file names the prompt specifies are wired up."""
+    audio = _attachment("DISP-006", "audio")
+    assert audio.url == "/assets/miora/disp006_arguement.mp3"
+    assert Path(audio.local_path).name == "disp006_arguement.mp3"
+    assert Path(audio.local_path).exists()
+
+    video = _attachment("DISP-007", "video")
+    assert video.url == "/assets/miora/disp007_harassment.mp4"
+    assert Path(video.local_path).name == "disp007_harassment.mp4"
+    assert Path(video.local_path).exists()
+
+    # Both dossiers are filed as safety incidents and carry the escalation
+    # directives a human reviewer has to act on.
+    for case_id in ("DISP-006", "DISP-007"):
+        case = _case(case_id)
+        assert case.dispute_type == "safety_incident"
+        assert case.escalation_directives, f"{case_id} has no escalation directives"
 
 
 def test_miora_assets_are_bound_and_present():

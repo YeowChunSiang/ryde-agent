@@ -202,14 +202,35 @@ def dashcam_frame(path: Path) -> None:
 
 
 def video_poster(path: Path) -> None:
-    """Poster frame for the generated cabin clip."""
-    img = Image.new("RGB", (1280, 720), (46, 48, 54))
+    """Poster frame for DISP-007: a covert back-seat night recording.
+
+    Deliberately dark and hand-held looking — the same low-light cabin the
+    ingestion pipeline flags as "night footage, visual detail is limited".
+    """
+    img = Image.new("RGB", (1280, 720), (10, 11, 16))
     d = ImageDraw.Draw(img)
-    seat_base(d, 1280, 720)
-    d.ellipse([430, 300, 900, 640], fill=(104, 66, 36))
-    d.ellipse([500, 360, 830, 580], fill=(72, 44, 24))
-    d.rounded_rectangle([60, 60, 620, 140], radius=12, fill=(0, 0, 0))
-    d.text((84, 84), "cabin_clip_01.mp4 · 00:03 / 00:06", font=font(40, True), fill=(255, 214, 102))
+    rnd = random.Random(29)
+    for _ in range(2400):  # sensor noise + crushed shadows
+        x, y = rnd.randint(0, 1280), rnd.randint(0, 720)
+        v = rnd.randint(8, 40)
+        d.point((x, y), fill=(v, v + 1, v + 5))
+    # windshield glow through the front screen
+    d.rectangle([0, 0, 1280, 220], fill=(26, 30, 44))
+    for i in range(40):
+        x = 30 + i * 32
+        d.ellipse([x, 70, x + 26, 104], fill=(222, 196, 140))
+    # two front seats, seen from behind
+    for cx in (330, 950):
+        d.rounded_rectangle([cx - 150, 250, cx + 150, 720], radius=60, fill=(24, 25, 32))
+    # driver's head + the arm reaching back over the seat
+    d.ellipse([880, 300, 980, 400], fill=(96, 88, 84))
+    d.polygon([(940, 380), (700, 520), (740, 570), (980, 440)], fill=(30, 30, 38))
+    d.ellipse([660, 500, 730, 570], fill=(96, 88, 84))
+    # recording overlay
+    d.rounded_rectangle([60, 60, 700, 140], radius=12, fill=(0, 0, 0))
+    d.text((84, 84), "disp007_harassment.mp4 · 00:03 / 00:06", font=font(38, True), fill=(255, 214, 102))
+    d.text((40, 660), "REC ●", font=font(30, True), fill=(239, 68, 68))
+    d.text((120, 664), "low-light · back seat · 23:12", font=font(24), fill=(148, 163, 184))
     img.save(path)
 
 
@@ -314,6 +335,14 @@ def write_cabin_mp4(path: Path, seconds: int = 6) -> None:
     """
     if path.exists():
         return
+    _encode_testsrc(path, seconds, "curves=all='0/0.15 0.5/0.45 1/0.85'")
+    raise RuntimeError(f"no usable ffmpeg encoder for {path}")
+
+
+def _encode_testsrc(
+    path: Path, seconds: int, video_filter: str, bitrate: str = "600k"
+) -> bool:
+    """Encode a synthetic clip, trying every encoder the host build offers."""
     for encoder in ("libx264", "libopenh264", "mpeg4", "libvpx-vp9"):
         result = subprocess.run(
             [
@@ -324,9 +353,11 @@ def write_cabin_mp4(path: Path, seconds: int = 6) -> None:
                 "-i",
                 f"testsrc=size=640x360:rate=25:duration={seconds}",
                 "-vf",
-                "curves=all='0/0.15 0.5/0.45 1/0.85'",
+                video_filter,
                 "-c:v",
                 encoder,
+                "-b:v",
+                bitrate,
                 "-pix_fmt",
                 "yuv420p",
                 str(path),
@@ -335,8 +366,43 @@ def write_cabin_mp4(path: Path, seconds: int = 6) -> None:
             text=True,
         )
         if result.returncode == 0 and path.exists():
-            return
-    raise RuntimeError(f"no usable ffmpeg encoder for {path}")
+            return True
+    return False
+
+
+def write_harassment_mp4(path: Path, seconds: int = 6) -> None:
+    """DISP-007: a deliberately dark, hand-held night recording.
+
+    The clip is crushed to a very low mean luminance on purpose so the vision
+    agent's "night footage, visual detail is limited" integrity flag fires —
+    that is exactly the finding a low-light covert cabin recording should
+    produce, and it is what the reviewer sees in the escalation packet.
+    """
+    if path.exists():
+        return
+    dark = "curves=all='0/0.0 0.5/0.09 1/0.20',noise=alls=10:allf=t+u"
+    if not _encode_testsrc(path, seconds, dark):
+        raise RuntimeError(f"no usable ffmpeg encoder for {path}")
+
+
+def write_argument_mp3(path: Path, seconds: float = 42.0, rate: int = 16000) -> None:
+    """DISP-006: the heated verbal argument, encoded as MP3 for web playback.
+
+    The waveform is generated as WAV first (the offline ASR can only probe a
+    real audio stream), then transcoded to MP3 so browsers play it natively.
+    The sidecar ``<name>.txt`` dialogue script follows the MP3 so the
+    deterministic ASR still "hears" the argument without TRTC credentials.
+    """
+    wav = path.with_suffix(".wav")
+    write_argument_wav(wav, seconds, rate)
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-i", str(wav), "-codec:a", "libmp3lame", "-b:a", "64k", str(path)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not path.exists():
+        raise RuntimeError(f"mp3 encoding failed for {path}: {result.stderr[-400:]}")
+    wav.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -364,13 +430,15 @@ MIORA_PROMPTS = {
         "car seat, with subtle visual artifacts and missing EXIF data, simulating a fraudulent "
         "'vomit fraud' cleaning fee claim."
     ),
-    "disp006_dashcam.png": (
-        "Interior dashcam footage from a ride-hailing vehicle. The driver is turned around, "
-        "aggressively gesturing toward the back seat. A dashboard clock reads '11:45 PM'."
+    "disp006_arguement.mp3": (
+        "An 8-second covert in-cabin audio recording of a heated verbal argument. The rider "
+        "politely asks the driver to lower the air-conditioning temperature; the driver shouts "
+        "back with insults and refuses, escalating into open hostility."
     ),
-    "disp007_poster.png": (
-        "Poster frame of a short cabin-camera clip: bubble tea soaking into the rear bench seat "
-        "of a Honda HR-V, captured seconds after dropoff."
+    "disp007_harassment.mp4": (
+        "A 12-second low-light covert night recording shot from the back seat of a ride-hailing "
+        "car by a female passenger, in portrait orientation (768x1258). The driver reaches back "
+        "while driving and makes inappropriate physical contact with her leg."
     ),
     "agents/<role>.png": (
         "Flat vector avatar for a dispute-resolution AI agent: rounded square badge, gradient "
@@ -379,29 +447,49 @@ MIORA_PROMPTS = {
 }
 
 
+def render(renderer, path: Path, label: str) -> None:
+    """Render ``path`` unless a real Miora asset has already been dropped in.
+
+    The dossier assets are hand-supplied Miora renders (multi-megabyte photos,
+    a recorded argument, a night video). Re-running the generator must never
+    clobber them, so an existing non-empty file is always kept.
+    """
+    if path.exists() and path.stat().st_size > 0:
+        print(f"skip    {path.name:34s} (existing asset preserved)")
+        return
+    renderer(path)
+    print(f"wrote   {path.name:34s} {label}")
+
+
 def main() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
     AVATARS.mkdir(parents=True, exist_ok=True)
     SAMPLES.mkdir(parents=True, exist_ok=True)
 
-    route_deviation(ASSETS / "disp001_route_deviation.png")
-    no_show_chat(ASSETS / "disp002_no_show_chat.png")
-    genuine_spill(ASSETS / "disp004_genuine_spill.png")
-    fake_spill(ASSETS / "disp003_fake_spill.png")
-    dashcam_frame(ASSETS / "disp006_dashcam.png")
-    video_poster(ASSETS / "disp007_poster.png")
+    render(route_deviation, ASSETS / "disp001_route_deviation.png", "PNG")
+    render(no_show_chat, ASSETS / "disp002_no_show_chat.png", "PNG")
+    render(genuine_spill, ASSETS / "disp004_genuine_spill.png", "PNG")
+    render(fake_spill, ASSETS / "disp003_fake_spill.png", "PNG")
 
     for role, (colour, code) in AGENT_STYLE.items():
         avatar(role, colour, code, AVATARS / f"{role}.png")
 
-    write_argument_wav(SAMPLES / "disp006_argument.wav")
-    write_cabin_mp4(SAMPLES / "disp007_cabin.mp4")
+    render(write_argument_wav, SAMPLES / "disp006_argument.wav", "WAV (upload sample)")
+    render(write_cabin_mp4, SAMPLES / "disp007_cabin.mp4", "MP4 (upload sample)")
+
+    # --- Phase 3.2: the named dossier assets referenced by cases.py --------
+    # Both live under frontend/public/assets/miora so the UI serves them at
+    # /assets/miora/... and the backend resolves the same file for ingestion.
+    render(write_argument_mp3, ASSETS / "disp006_arguement.mp3", "MP3")
+    render(write_harassment_mp4, ASSETS / "disp007_harassment.mp4", "MP4")
 
     manifest = {
         "generator": "scripts/generate_mock_assets.py",
         "note": (
             "Assets are locally rendered stand-ins for Tencent Miora output. Replace any file "
-            "with a real Miora render of the recorded prompt — the UI references them by name."
+            "with a real Miora render of the recorded prompt — the UI references them by name. "
+            "The generator skips any file that already exists, so hand-supplied Miora renders "
+            "survive re-running the script."
         ),
         "assets": MIORA_PROMPTS,
         "agent_avatars": {role: AGENT_STYLE[role][0] for role in AGENT_STYLE},

@@ -10,8 +10,10 @@ DISP-001   route_deviation               Second required text category (expected
 DISP-003   property_damage               Multi-modal vision agent *rejecting* fabricated evidence
 DISP-004   property_damage               Multi-modal vision agent *accepting* valid evidence
 DISP-005   safety_incident               CRITICAL SLA fast-track + mandatory human escalation
-DISP-006   safety_incident               Audio evidence — TRTC ASR transcription of verbal abuse
-DISP-007   property_damage               Video evidence — keyframe extraction from a cabin clip
+DISP-006   safety_incident               Audio evidence — TRTC ASR transcription of a verbal
+                                         altercation (AC temperature dispute), routed HIGH
+DISP-007   safety_incident               Video evidence — 1 fps keyframes from a low-light
+                                         covert recording of physical/sexual harassment, CRITICAL
 =========  ============================  ==========================================
 
 DISP-003/004 exist as a pair on purpose: they prove the judge is not biased
@@ -21,6 +23,16 @@ also awards a legitimate one.
 DISP-005 exercises the Phase 2 safety net end to end: the SLA & Routing Manager
 tags it CRITICAL and jumps the queue, and the escalation protocol halts
 autonomous arbitration regardless of how confident the Judge is.
+
+DISP-006/007 are the Phase 3.2 multi-modal pair. Both are safety incidents, but
+they sit in different triage bands on purpose: DISP-007 (physical/sexual
+harassment) is CRITICAL and therefore the first thing a reviewer sees, while
+DISP-006 (a verbal altercation over the cabin temperature) is pinned HIGH —
+elevated and fast-tracked, but correctly behind an immediate physical-safety
+threat. Each dossier carries ``escalation_directives``: the immediate actions
+the escalation protocol hands the reviewer (apology note / reprimand / goodwill
+voucher for the verbal case; instant suspension / safety ticket / law-enforcement
+referral for the harassment case).
 """
 
 from __future__ import annotations
@@ -580,13 +592,17 @@ DISP_005: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
-# DISP-006 — Safety Incident with a covert audio recording (Phase 3)
+# DISP-006 — Safety Incident: verbal altercation over the cabin temperature
 # ---------------------------------------------------------------------------
 # Exercises the TRTC ASR pipeline: a passenger recording captured inside the
 # trip window, transcribed into speaker turns, scored for hostility and handed
 # to the Evidence Engine, the Fraud Agent and the Judge. Safety incidents are
 # always outside the autonomy boundary, so the expected outcome is escalation
 # with the transcript attached to the reviewer's packet.
+#
+# Triage: pinned HIGH (not CRITICAL) — a verbal altercation is a serious
+# conduct matter but not an immediate physical threat, so it must queue behind
+# DISP-007 while still jumping ahead of every standard ticket.
 
 DISP_006: dict[str, Any] = {
     "dispute_ticket": {
@@ -595,9 +611,11 @@ DISP_006: dict[str, Any] = {
         "filed_by": "rider",
         "dispute_type": "safety_incident",
         "description": (
-            "The driver screamed at me for the whole ride and threatened me when I asked him to "
-            "slow down. I recorded the argument on my phone — you can hear him say he knows where "
-            "I live. I want this driver taken off the road."
+            "I asked the driver to lower the air-conditioning because the cabin was "
+            "uncomfortably hot. He refused aggressively, started shouting at me and insulted me "
+            "for the rest of the ride. I recorded the whole argument on my phone. No passenger "
+            "should be spoken to like that for asking to be comfortable — I want this driver "
+            "reprimanded."
         ),
         "filed_at": "2026-09-18T23:55:00+08:00",
         "status": "open",
@@ -643,21 +661,22 @@ DISP_006: dict[str, Any] = {
         {"timestamp": "2026-09-18T23:49:00+08:00", "lat": 1.3691, "lng": 103.8454, "speed_kmh": 0, "status": "completed"},
     ],
     "chat_logs": [
-        {"timestamp": "2026-09-18T23:38:00+08:00", "sender": "rider", "type": "message", "content": "Please slow down, you are going too fast on this road."},
-        {"timestamp": "2026-09-18T23:39:00+08:00", "sender": "driver", "type": "message", "content": "Do not tell me how to drive."},
+        {"timestamp": "2026-09-18T23:36:00+08:00", "sender": "rider", "type": "message", "content": "Hi, could you turn the air-con down a little? It is very warm in the back."},
+        {"timestamp": "2026-09-18T23:37:00+08:00", "sender": "driver", "type": "message", "content": "It is my car, I decide the temperature. Deal with it."},
+        {"timestamp": "2026-09-18T23:39:00+08:00", "sender": "rider", "type": "message", "content": "I am just asking politely — you do not need to shout at me."},
         {"timestamp": "2026-09-18T23:50:00+08:00", "sender": "rider", "type": "message", "content": "I have recorded the whole argument, I am filing a safety report."},
     ],
     "app_events": [
+        {"timestamp": "2026-09-18T23:41:00+08:00", "event_type": "safety_recording_started", "details": "Rider activated the in-app safety recorder; 8 s captured."},
         {"timestamp": "2026-09-18T23:44:00+08:00", "event_type": "harsh_braking_detected", "details": "Harsh braking logged at 88 km/h on the CTE exit."},
-        {"timestamp": "2026-09-18T23:45:00+08:00", "event_type": "safety_recording_started", "details": "Rider activated the in-app safety recorder; 42 s captured."},
         {"timestamp": "2026-09-18T23:49:00+08:00", "event_type": "trip_completed", "details": "Trip completed. 12.4 km, 21 min. Fare $22.00 charged."},
-        {"timestamp": "2026-09-18T23:55:00+08:00", "event_type": "safety_complaint_filed", "details": "Rider filed a safety complaint with an audio recording attached."},
+        {"timestamp": "2026-09-18T23:55:00+08:00", "event_type": "safety_complaint_filed", "details": "Rider filed a safety complaint (verbal altercation / AC temperature) with an audio recording attached."},
     ],
     "media_attachments": [
         {
             "attachment_id": "media-disp006-audio",
             "media_type": "audio",
-            "url": "/media/samples/disp006_argument.wav",
+            "url": "/assets/miora/disp006_arguement.mp3",
             "uploaded_by": "rider",
             "captured_at": "2026-09-18T23:41:00+08:00",
             "device_model": "in-app safety recorder (iPhone 14)",
@@ -665,20 +684,37 @@ DISP_006: dict[str, Any] = {
             "gps_lng": 103.8462,
             "exif_present": True,
             "ai_generated_probability": 0.02,
-            "duration_s": 42.0,
-            "local_path": "samples/disp006_argument.wav",
-            "asset_key": "disp006_argument",
-            "caption": "Covert cabin recording of the argument during the trip",
+            "duration_s": 8.2,
+            "local_path": "../frontend/public/assets/miora/disp006_arguement.mp3",
+            "asset_key": "disp006_arguement",
+            "caption": "Covert cabin recording of the air-conditioning argument during the trip",
             # Scripted dialogue for the deterministic ASR: the same file always
             # transcribes to the same transcript, so the ruling is replayable.
+            # With live TRTC credentials this hint is ignored and the real
+            # waveform is transcribed instead.
             "transcript_hint": (
-                "driver: You stupid passenger, shut up and sit there! | "
-                "rider: Please slow down, you are scaring me. | "
-                "driver: I will find you after this trip, I know where you live! | "
-                "rider: I am recording this, stop the car. | "
-                "driver: Say one more word and I will break your phone."
+                "rider: Could you please lower the air-conditioning? It is really hot back here. | "
+                "driver: No! I decide the temperature in my own car, you stupid passenger. | "
+                "rider: Please, I am only asking you to turn it down a little. Why are you shouting at me? | "
+                "driver: Shut up and sit there! Keep arguing and I will find you after this trip!"
             ),
         }
+    ],
+    # --- Phase 3.2: triage band + reviewer directives ----------------------
+    "sla_priority": "high",
+    "sla_priority_reason": (
+        "Verbal-altercation safety escalation: the attached recording captures sustained "
+        "shouting and insults, so the ticket is fast-tracked — but it is not an immediate "
+        "physical threat, so it sits below CRITICAL."
+    ),
+    "financial_value": 22.00,
+    "financial_note": "Fare charged, plus a goodwill voucher on review",
+    "intake": "incoming",
+    "escalation_directives": [
+        "Issue a written apology note to the rider on behalf of the platform.",
+        "Reprimand the driver and record a formal conduct warning on their profile.",
+        "Release a goodwill ride voucher to the rider for the distress caused.",
+        "Review the driver against the Driver Conduct & Anti-Harassment policy before their next trip.",
     ],
     "cancellation_policy": {
         "free_wait_time_min": 5,
@@ -690,44 +726,53 @@ DISP_006: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
-# DISP-007 — Property Damage with cabin video evidence (Phase 3)
+# DISP-007 — Critical Safety Incident: physical / sexual harassment (video)
 # ---------------------------------------------------------------------------
-# Exercises the video ingestion pipeline: a 6-second cabin clip is decoded at
-# 1 fps, the keyframes are cross-referenced against the trip timeline and the
-# Vision Agent's finding is cited by the Judge in its reasoning.
+# The most serious ticket in the queue, and the one the reviewer portal is
+# built around. A female passenger films from the back seat at night; the clip
+# is decoded at 1 fps and the Vision Agent flags both the physical boundary
+# violation and the low-light capture conditions.
+#
+# Expected behaviour, end to end:
+#   * SLA & Routing Manager assigns CRITICAL (highest band, queue position 1)
+#   * the Judge triggers the escalation protocol — confidence floor overridden,
+#     `escalated_to_human` is forced by the category rule
+#   * the packet carries the immediate actions: instant suspension, safety
+#     ticket, referral to human investigation / law-enforcement support
 
 DISP_007: dict[str, Any] = {
     "dispute_ticket": {
         "dispute_id": "DISP-007",
         "trip_id": "TRIP-2026-12140",
-        "filed_by": "driver",
-        "dispute_type": "property_damage",
+        "filed_by": "rider",
+        "dispute_type": "safety_incident",
         "description": (
-            "The rider spilled bubble tea all over the rear bench seat and then denied it. My "
-            "cabin camera recorded the whole thing — the clip shows the drink going over and the "
-            "seat soaked at dropoff. I am claiming the $60 cleaning fee with the video."
+            "While he was driving, the driver reached back over the seat and touched my thigh. "
+            "I froze and then recorded him on my phone from the back seat — it is dark, but you "
+            "can clearly see his arm coming back toward me. I want his account suspended "
+            "immediately and this referred to the police. I am frightened to book another Ryde."
         ),
-        "filed_at": "2026-09-20T21:40:00+08:00",
+        "filed_at": "2026-09-20T23:20:00+08:00",
         "status": "open",
     },
     "rider_profile": {
         "rider_id": "R-8890",
-        "name": "Daniel Chua",
-        "account_age_days": 75,
-        "total_trips": 12,
-        "avg_rating": 4.4,
-        "dispute_history": {"total_disputes": 1, "upheld": 0, "rejected": 1},
+        "name": "Amira Yusof",
+        "account_age_days": 210,
+        "total_trips": 64,
+        "avg_rating": 4.9,
+        "dispute_history": {"total_disputes": 0, "upheld": 0, "rejected": 0},
         "fraud_flags": 0,
         "payment_method": "credit_card",
     },
     "driver_profile": {
         "driver_id": "D-2290",
-        "name": "Nurul Huda",
+        "name": "Zulkifli bin Omar",
         "account_age_days": 980,
         "total_trips": 2640,
-        "avg_rating": 4.89,
-        "dispute_history": {"total_disputes": 0, "upheld_against": 0, "rejected": 0},
-        "fraud_flags": 0,
+        "avg_rating": 4.72,
+        "dispute_history": {"total_disputes": 2, "upheld_against": 1, "rejected": 1},
+        "fraud_flags": 1,
         "vehicle": "Honda HR-V (SKT 2290 B)",
     },
     "trip_data": {
@@ -736,47 +781,61 @@ DISP_007: dict[str, Any] = {
         "driver_id": "D-2290",
         "pickup_location": {"name": "Somerset 313", "lat": 1.3010, "lng": 103.8380},
         "dropoff_location": {"name": "Serangoon Nex", "lat": 1.3550, "lng": 103.8710},
-        "trip_start_time": "2026-09-20T21:10:00+08:00",
-        "trip_end_time": "2026-09-20T21:34:00+08:00",
+        "trip_start_time": "2026-09-20T23:05:00+08:00",
+        "trip_end_time": "2026-09-20T23:29:00+08:00",
         "actual_distance_km": 9.8,
         "actual_duration_min": 24,
         "fare_estimate": 18.50,
         "fare_charged": 18.50,
-        "cleaning_fee_claimed": 60.00,
     },
     "gps_telemetry": [
-        {"timestamp": "2026-09-20T21:10:00+08:00", "lat": 1.3010, "lng": 103.8380, "speed_kmh": 0, "status": "trip_start"},
-        {"timestamp": "2026-09-20T21:18:00+08:00", "lat": 1.3220, "lng": 103.8510, "speed_kmh": 38, "status": "en_route"},
-        {"timestamp": "2026-09-20T21:27:00+08:00", "lat": 1.3410, "lng": 103.8630, "speed_kmh": 42, "status": "en_route"},
-        {"timestamp": "2026-09-20T21:34:00+08:00", "lat": 1.3550, "lng": 103.8710, "speed_kmh": 0, "status": "completed"},
+        {"timestamp": "2026-09-20T23:05:00+08:00", "lat": 1.3010, "lng": 103.8380, "speed_kmh": 0, "status": "trip_start"},
+        {"timestamp": "2026-09-20T23:13:00+08:00", "lat": 1.3220, "lng": 103.8510, "speed_kmh": 38, "status": "en_route"},
+        {"timestamp": "2026-09-20T23:18:00+08:00", "lat": 1.3340, "lng": 103.8570, "speed_kmh": 44, "status": "en_route"},
+        {"timestamp": "2026-09-20T23:22:00+08:00", "lat": 1.3410, "lng": 103.8630, "speed_kmh": 42, "status": "en_route"},
+        {"timestamp": "2026-09-20T23:29:00+08:00", "lat": 1.3550, "lng": 103.8710, "speed_kmh": 0, "status": "completed"},
     ],
     "chat_logs": [
-        {"timestamp": "2026-09-20T21:30:00+08:00", "sender": "driver", "type": "message", "content": "Please be careful with the drink, it is not covered."},
-        {"timestamp": "2026-09-20T21:35:00+08:00", "sender": "rider", "type": "message", "content": "It did not spill, nothing happened."},
-        {"timestamp": "2026-09-20T21:37:00+08:00", "sender": "driver", "type": "message", "content": "My cabin camera recorded it, I am filing the cleaning claim."},
+        {"timestamp": "2026-09-20T23:21:00+08:00", "sender": "rider", "type": "message", "content": "Please keep your hands on the wheel."},
+        {"timestamp": "2026-09-20T23:22:00+08:00", "sender": "driver", "type": "message", "content": "Relax, I am just being friendly."},
+        {"timestamp": "2026-09-20T23:30:00+08:00", "sender": "rider", "type": "message", "content": "You touched me. I have it on video and I am reporting you."},
     ],
     "app_events": [
-        {"timestamp": "2026-09-20T21:34:00+08:00", "event_type": "trip_completed", "details": "Trip completed. 9.8 km, 24 min. Fare $18.50 charged."},
-        {"timestamp": "2026-09-20T21:36:00+08:00", "event_type": "evidence_uploaded", "details": "Driver uploaded 1 video as evidence (cabin_clip_01.mp4, 6 s). Capture time 21:36."},
-        {"timestamp": "2026-09-20T21:40:00+08:00", "event_type": "cleaning_claim_filed", "details": "Driver D-2290 filed a cleaning claim of $60.00 supported by video evidence."},
+        {"timestamp": "2026-09-20T23:19:00+08:00", "event_type": "safety_recording_started", "details": "Rider activated the in-app safety recorder from the back seat; 12 s captured."},
+        {"timestamp": "2026-09-20T23:29:00+08:00", "event_type": "trip_completed", "details": "Trip completed. 9.8 km, 24 min. Fare $18.50 charged."},
+        {"timestamp": "2026-09-20T23:31:00+08:00", "event_type": "evidence_uploaded", "details": "Rider uploaded 1 video as evidence (disp007_harassment.mp4, 12 s, 768x1258 portrait). Capture time 23:31."},
+        {"timestamp": "2026-09-20T23:34:00+08:00", "event_type": "safety_complaint_filed", "details": "Rider filed a CRITICAL safety complaint alleging physical/sexual harassment."},
     ],
     "media_attachments": [
         {
             "attachment_id": "media-disp007-video",
             "media_type": "video",
-            "url": "/media/samples/disp007_cabin.mp4",
-            "uploaded_by": "driver",
-            "captured_at": "2026-09-20T21:36:00+08:00",
-            "device_model": "70mai cabin dashcam",
+            "url": "/assets/miora/disp007_harassment.mp4",
+            "uploaded_by": "rider",
+            "captured_at": "2026-09-20T23:31:00+08:00",
+            "device_model": "iPhone 14 — covert back-seat recording",
             "gps_lat": 1.3550,
             "gps_lng": 103.8710,
             "exif_present": True,
-            "ai_generated_probability": 0.05,
-            "duration_s": 6.0,
-            "local_path": "samples/disp007_cabin.mp4",
-            "asset_key": "disp007_cabin",
-            "caption": "Cabin camera shows bubble tea soaking into the rear bench seat at dropoff",
+            "ai_generated_probability": 0.04,
+            "duration_s": 12.27,
+            "local_path": "../frontend/public/assets/miora/disp007_harassment.mp4",
+            "asset_key": "disp007_harassment",
+            "caption": (
+                "Low-light back-seat recording — the driver reaches back over the seat and "
+                "touches the passenger's thigh while the car is moving"
+            ),
         }
+    ],
+    # --- Phase 3.2: triage band + reviewer directives ----------------------
+    "financial_value": 0.0,
+    "financial_note": "Non-monetary — rider safety; no fare dispute",
+    "intake": "incoming",
+    "escalation_directives": [
+        "Recommend instant suspension of the driver account pending investigation.",
+        "Open a priority safety ticket with the Trust & Safety team.",
+        "Refer to human investigation with law-enforcement support — alleged physical/sexual harassment.",
+        "Proactively contact the rider with support resources and preserve the recording as evidence.",
     ],
     "cancellation_policy": {
         "free_wait_time_min": 5,
@@ -798,35 +857,51 @@ CASE_REGISTRY: dict[str, dict[str, Any]] = {
 }
 
 #: Miora-generated mock evidence rendered by the UI (``frontend/public/assets/miora``).
+#: Image-only: audio and video payloads are played back by the Evidence panel's
+#: own <audio>/<video> players straight from the dossier attachment, so DISP-006
+#: (audio) and DISP-007 (video) carry no still image here.
 MIORA_ASSETS: dict[str, list[str]] = {
     "DISP-001": ["/assets/miora/disp001_route_deviation.png"],
     "DISP-002": ["/assets/miora/disp002_no_show_chat.png"],
     "DISP-003": ["/assets/miora/disp003_fake_spill.png"],
     "DISP-004": ["/assets/miora/disp004_genuine_spill.png"],
-    "DISP-006": ["/assets/miora/disp006_dashcam.png"],
-    "DISP-007": ["/assets/miora/disp007_poster.png"],
 }
 
+#: Phase 3.2: queue metadata the Reviewer Portal sorts and badges on.
+#: ``intake`` splits the seeded dataset into a live queue and a carried-over
+#: history so the dashboard opens with both tabs populated.
 CASE_META: dict[str, dict[str, Any]] = {
     "DISP-001": {
         "title": "Route Deviation — Raffles Place to Paya Lebar",
         "blurb": "Rider says the driver detoured north and inflated the fare from $20 to $28.",
         "expected_ruling": "PARTIAL REFUND — ~$5.60 (traffic justified part of the detour)",
+        "financial_value": 8.00,
+        "financial_note": "Fare difference under dispute",
+        "intake": "historical",
     },
     "DISP-002": {
         "title": "No-Show Charge — Tiong Bahru Plaza",
         "blurb": "Rider claims the driver never arrived but was still charged the $5 no-show fee.",
         "expected_ruling": "UPHELD — driver waited the full 8-minute window and tried to call",
+        "financial_value": 5.00,
+        "financial_note": "No-show cancellation fee",
+        "intake": "historical",
     },
     "DISP-003": {
         "title": "Property Damage — disputed cleaning fee",
         "blurb": "Driver claims $60 for a spilled drink; the photo fails forensic validation.",
         "expected_ruling": "NO ACTION — fee waived, claim escalated to Fraud & Safety",
+        "financial_value": 60.00,
+        "financial_note": "Cleaning fee claimed",
+        "intake": "historical",
     },
     "DISP-004": {
         "title": "Property Damage — verified spill",
         "blurb": "Driver claims $60 with a photo taken at dropoff; rider admits the spill.",
         "expected_ruling": "COMPENSATE DRIVER — $60 cleaning fee awarded",
+        "financial_value": 60.00,
+        "financial_note": "Cleaning fee claimed",
+        "intake": "incoming",
     },
     "DISP-005": {
         "title": "Safety Incident — alleged dangerous driving",
@@ -835,34 +910,63 @@ CASE_META: dict[str, dict[str, Any]] = {
             "harsh-braking events. CRITICAL — fast-tracked and always human-reviewed."
         ),
         "expected_ruling": "ESCALATED TO HUMAN — safety incidents are never auto-resolved",
+        "financial_value": 24.50,
+        "financial_note": "Fare charged",
+        "intake": "incoming",
     },
     "DISP-006": {
-        "title": "Safety Incident — verbal abuse on tape",
+        "title": "Safety Incident — verbal altercation on tape",
         "blurb": (
-            "Rider submits a 42 s covert cabin recording; TRTC ASR transcribes threats and "
-            "abuse. Audio evidence — always escalated to a human reviewer."
+            "Rider asks for a cooler cabin; the driver shouts back and insults her. The 8 s "
+            "covert recording is transcribed by TRTC ASR. HIGH — fast-tracked, always human-reviewed."
         ),
         "expected_ruling": (
-            "ESCALATED TO HUMAN — transcript shows an explicit threat (hostility ~0.9)"
+            "ESCALATED TO HUMAN — transcript shows shouting, insults and a threat (hostility ~1.0)"
         ),
+        "financial_value": 22.00,
+        "financial_note": "Fare charged, plus a goodwill voucher on review",
+        "intake": "incoming",
     },
     "DISP-007": {
-        "title": "Property Damage — cabin video claim",
+        "title": "Critical Safety Incident — physical/sexual harassment on video",
         "blurb": (
-            "Driver submits a 6 s cabin clip; the pipeline samples 1 keyframe/s and the "
-            "Vision Agent confirms a liquid spill inside the trip window."
+            "A passenger films from the back seat at night: the driver reaches back and touches "
+            "her thigh. The 12 s portrait clip is sampled at 1 keyframe/s and flagged as low-light footage. "
+            "CRITICAL — top of queue."
         ),
-        "expected_ruling": "COMPENSATE DRIVER — $60, corroborated by extracted keyframes",
+        "expected_ruling": (
+            "ESCALATED TO HUMAN — instant suspension, safety ticket and law-enforcement referral"
+        ),
+        "financial_value": 0.0,
+        "financial_note": "Non-monetary — rider safety; no fare dispute",
+        "intake": "incoming",
     },
 }
 
 
 def list_cases() -> list[CaseSummary]:
-    """Describe every built-in case for the UI case picker."""
+    """Describe every built-in case for the UI case picker.
+
+    Phase 3.2: the descriptor also carries the queue metadata the Reviewer
+    Portal needs *before* a run exists — money at stake, whether the ticket is
+    incoming or carried over, and the triage band intake pinned (or that the
+    SLA & Routing Manager will derive from the dispute type).
+    """
     summaries: list[CaseSummary] = []
     for case_id, payload in CASE_REGISTRY.items():
         meta = CASE_META[case_id]
         ticket = payload["dispute_ticket"]
+        attachments = payload.get("media_attachments") or []
+        sla_priority = payload.get("sla_priority")
+        if not sla_priority:
+            dtype = str(ticket["dispute_type"])
+            if dtype == "safety_incident":
+                sla_priority = "critical"
+            elif dtype in {"property_damage", "fare_dispute"}:
+                sla_priority = "high"
+            else:
+                sla_priority = "normal"
+
         summaries.append(
             CaseSummary(
                 case_id=case_id,
@@ -872,8 +976,14 @@ def list_cases() -> list[CaseSummary]:
                 blurb=meta["blurb"],
                 expected_ruling=meta["expected_ruling"],
                 filed_by=ticket["filed_by"],
-                multimodal=bool(payload.get("media_attachments")),
+                filed_at=ticket["filed_at"],
+                multimodal=bool(attachments),
                 evidence_assets=MIORA_ASSETS.get(case_id, []),
+                financial_value=float(meta.get("financial_value", 0.0)),
+                financial_note=meta.get("financial_note"),
+                intake=meta.get("intake", "incoming"),
+                sla_priority=sla_priority,
+                evidence_kind=attachments[0]["media_type"] if attachments else None,
             )
         )
     return summaries

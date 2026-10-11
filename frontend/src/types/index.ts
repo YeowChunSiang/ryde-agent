@@ -61,9 +61,21 @@ export interface CaseSummary {
   blurb: string;
   expected_ruling: string;
   filed_by: string;
+  /** Ticket creation timestamp (ISO8601), used for queue aging logic. */
+  filed_at: string;
   multimodal: boolean;
   /** Phase 3: bundled Miora evidence assets rendered in the Evidence panel. */
   evidence_assets?: string[];
+  // --- Phase 3.2: reviewer queue metadata --------------------------------
+  /** Money at stake — secondary sort key of the reviewer queue. */
+  financial_value?: number;
+  financial_note?: string | null;
+  /** `historical` tickets are seeded straight into the History tab. */
+  intake?: "incoming" | "historical";
+  /** Triage band intake pinned (or the SLA router will derive). */
+  sla_priority?: SLAPriority | null;
+  /** Media type of the primary attachment (`image` / `video` / `audio`). */
+  evidence_kind?: string | null;
 }
 
 export interface Fact {
@@ -307,6 +319,63 @@ export interface OverrideAccepted {
   message: string;
 }
 
+// --- Phase 3.2: Human Reviewer Portal --------------------------------------
+
+/** Mock identity-provider session handed back by `POST /login`. */
+export interface LoginAccepted {
+  token: string;
+  reviewer_id: string;
+  name: string;
+  role: string;
+  issued_at: string;
+}
+
+export interface ApproveRequest {
+  reviewer_id: string;
+  note: string;
+}
+
+/** Audit record written by `POST /approve/{run_id}` — the ticket's closing entry. */
+export interface ApprovalAccepted {
+  run_id: string;
+  dispute_id: string;
+  status: "human_verified";
+  decision: string | null;
+  amount: number;
+  reviewer_id: string;
+  note: string;
+  verified_at: string;
+  knowledge_base_size: number;
+  message: string;
+}
+
+/** Lifecycle of one ticket inside the Reviewer Portal queue. */
+export type CaseRunStatus =
+  | "idle"
+  | "pending"
+  | "processing"
+  | "resolved"
+  | "escalated"
+  | "failed";
+
+/**
+ * Closing entry of a reviewed ticket — either a human verification (approve),
+ * a correction (override) or a pre-automation baseline seeded from the legacy
+ * dataset.
+ */
+export interface ReviewerAction {
+  kind: "approved" | "overridden" | "baseline";
+  reviewer_id: string;
+  reviewer_name: string;
+  note: string;
+  original_decision: string | null;
+  original_amount: number;
+  final_decision: string;
+  final_amount: number;
+  at: string | null;
+  knowledge_base_size: number;
+}
+
 export interface AgentEvent {
   run_id: string;
   seq: number;
@@ -336,6 +405,8 @@ export interface ResolutionResult {
   ruling: Ruling | null;
   escalation: EscalationPacket | null;
   override: OverrideAccepted | null;
+  /** Phase 3.2: human verification recorded by `POST /approve/{run_id}`. */
+  approval: ApprovalAccepted | null;
   started_at: string;
   finished_at: string | null;
   duration_ms: number | null;
@@ -361,6 +432,11 @@ export interface DisputeAccepted {
   stream_url: string;
   result_url: string;
   engine: "adp" | "offline";
+  /** Phase 3.2: triage assigned the moment the ticket was accepted. */
+  sla_priority?: SLAPriority | null;
+  fast_tracked?: boolean;
+  queue?: string | null;
+  sla_due_at?: string | null;
 }
 
 export interface Health {

@@ -103,7 +103,13 @@ class SLARoutingManager:
         # --- derive priority -------------------------------------------------
         if case.sla_priority is not None:
             priority = case.sla_priority
-            reasons.append(f"Priority {priority.value.upper()} pinned by the submitting system.")
+            # Phase 3.2: intake can pin a band (e.g. a verbal altercation is
+            # HIGH, not CRITICAL) and explain why. The dossier's reason is the
+            # authoritative one; the fallback keeps the API honest.
+            reasons.append(
+                getattr(case, "sla_priority_reason", None)
+                or f"Priority {priority.value.upper()} pinned by the submitting system."
+            )
         elif ticket.dispute_type == DisputeType.SAFETY_INCIDENT:
             priority = SLAPriority.CRITICAL
             reasons.append("Safety incident — auto-escalated to CRITICAL.")
@@ -985,6 +991,11 @@ def build_escalation_packet(
         ]
 
     recommended_focus: list[str] = []
+    # Phase 3.2: the dossier can dictate the immediate actions the reviewer must
+    # take (instant suspension, safety ticket, law-enforcement referral...).
+    # They come first — everything else is context, these are the deadlines.
+    directives = list(getattr(case, "escalation_directives", None) or [])
+    recommended_focus.extend(directives)
     if ruling.confidence < confidence_threshold:
         recommended_focus.append(
             f"Judge confidence was only {ruling.confidence:.0%} — confirm or replace the "

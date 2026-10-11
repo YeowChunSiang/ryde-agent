@@ -14,6 +14,9 @@ GET          /stream/{run_id}         SSE stream of live inter-agent messages
 GET          /stream                  SSE stream for the most recent run
 GET          /result/{run_id}         Final resolution result
 POST         /resolve                 Synchronous resolve (no streaming) — for tests
+POST         /login                   Reviewer Portal session (mock identity provider)
+POST         /approve/{run_id}        Reviewer approves the ruling, closes the ticket
+POST         /override/{run_id}       Reviewer override -> learning feedback loop
 ===========  =======================  ==========================================
 """
 
@@ -21,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,10 +40,14 @@ from config import get_settings
 from media_store import MediaStore, media_type_for
 from models import (
     AgentRole,
+    ApprovalAccepted,
+    ApproveRequest,
     DisputeAccepted,
     DisputeCase,
     DisputeRequest,
     EventLevel,
+    LoginAccepted,
+    LoginRequest,
     MediaAttachment,
     OverrideAccepted,
     OverrideRequest,
@@ -68,6 +76,18 @@ _SSE_HEADERS = {
     "Cache-Control": "no-cache, no-transform",
     "Connection": "keep-alive",
     "X-Accel-Buffering": "no",
+}
+
+#: Phase 3.2 — seeded Reviewer Portal accounts. A real deployment replaces
+#: this dict (and `/login`) with the platform's identity provider; nothing else
+#: in the portal reads credentials.
+REVIEWER_ACCOUNTS: dict[str, dict[str, str]] = {
+    "reviewer@ryde.com": {
+        "password": "admin2026",
+        "reviewer_id": "reviewer-01",
+        "name": "Wei Lin Chua",
+        "role": "dispute_reviewer",
+    }
 }
 
 
@@ -457,6 +477,48 @@ async def result(run_id: str) -> ResolutionResult:
 # ---------------------------------------------------------------------------
 
 
+@app.post("/login", response_model=LoginAccepted)
+async def login(payload: LoginRequest) -> LoginAccepted:
+    """Authenticate an operations reviewer into the Reviewer Portal.
+
+    The hackathon build ships a single seeded reviewer account instead of an
+    identity provider. Swapping in Ryde SSO means replacing this one handler —
+    the rest of the portal only ever reads the returned token.
+    """
+    reviewer = REVIEWER_ACCOUNTS.get(payload.email.strip().lower())
+    if reviewer is None or reviewer["password"] != payload.password:
+        raise HTTPException(status_code=401, detail="Invalid reviewer credentials")
+    logger.info("reviewer %s signed in", reviewer["reviewer_id"])
+    return LoginAccepted(
+        token=f"ryde-reviewer-{uuid.uuid4().hex}",
+        reviewer_id=reviewer["reviewer_id"],
+        name=reviewer["name"],
+        role=reviewer["role"],
+    )
+
+
+@app.post("/approve/{run_id}", response_model=ApprovalAccepted)
+async def approve_run(run_id: str, payload: ApproveRequest) -> ApprovalAccepted:
+    """Reviewer confirms the agent ruling and closes the dispute.
+
+    The mirror image of the override path: approving writes a human
+    verification into the audit trail and moves the ticket to history, but it
+    deliberately does *not* add a precedent — the knowledge base only learns
+    from decisions that correct the agents.
+    """
+    result = await orchestrator.apply_approval(run_id, payload)
+    if result is None or result.approval is None:
+        raise HTTPException(status_code=404, detail=f"Unknown run '{run_id}'")
+    logger.info(
+        "approval on %s by %s -> %s (knowledge base unchanged at %d precedents)",
+        run_id,
+        payload.reviewer_id,
+        result.approval.decision,
+        result.approval.knowledge_base_size,
+    )
+    return result.approval
+
+
 @app.post("/override/{run_id}", response_model=OverrideAccepted)
 async def override_run(run_id: str, payload: OverrideRequest) -> OverrideAccepted:
     """Human reviewer overrides an escalated ruling.
@@ -567,6 +629,16 @@ async def api_result(run_id: str) -> ResolutionResult:
 @app.post("/api/override/{run_id}", response_model=OverrideAccepted)
 async def api_override_run(run_id: str, payload: OverrideRequest) -> OverrideAccepted:
     return await override_run(run_id, payload)
+
+
+@app.post("/api/login", response_model=LoginAccepted)
+async def api_login(payload: LoginRequest) -> LoginAccepted:
+    return await login(payload)
+
+
+@app.post("/api/approve/{run_id}", response_model=ApprovalAccepted)
+async def api_approve_run(run_id: str, payload: ApproveRequest) -> ApprovalAccepted:
+    return await approve_run(run_id, payload)
 
 
 @app.get("/api/precedents")
