@@ -555,6 +555,50 @@ class OfflineReasoner:
             )
 
         caption = (attachment.caption or "").lower()
+        # A caption that explicitly says the cabin is clean / no damage visible
+        # is direct evidence that the driver's cleaning claim is unfounded: the
+        # photo is authentic, but its *content* does not match the alleged mess.
+        # We mark the photo as not-supporting the driver so the judge can weigh
+        # it correctly. The cleaning claim falls without admissible evidence.
+        content_negates_claim = any(
+            k in caption
+            for k in (
+                "perfectly clean",
+                "clean seat",
+                "no stains",
+                "no stain",
+                "no dirt",
+                "no mess",
+                "no spill",
+                "no damage",
+                "no residue",
+                "no food",
+                "undamaged",
+            )
+        )
+        if content_negates_claim:
+            severity = "none"
+            genuine = False
+            anomalies.append(
+                "Image content contradicts the driver's claim — the cabin is clean, so the "
+                "photo does not evidence the alleged mess"
+            )
+            reasoning = (
+                "The image is authentic (EXIF timestamp and synthetic-media screen both pass), "
+                "but its visual content shows a clean cabin with no stains, dirt or residue. "
+                "Under policy DAMAGE-2 the cleaning fee cannot rely on a photo that does not "
+                "depict the alleged mess, so this evidence does not support the driver."
+            )
+            return VisionFinding(
+                attachment_id=attachment.attachment_id,
+                genuine=False,
+                authenticity_confidence=0.92,
+                ai_generated_probability=ai_prob,
+                exif_timestamp_delta_min=delta,
+                severity="none",
+                anomalies=anomalies,
+                reasoning=reasoning,
+            )
         if any(k in caption for k in ("spill", "drink", "liquid", "bubble tea", "coffee")):
             severity = "liquid_spill"
         elif any(k in caption for k in ("mess", "rubbish", "litter", "stain", "food")):

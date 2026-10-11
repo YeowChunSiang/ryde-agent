@@ -1,4 +1,3 @@
-rider: Could you please lower the air-conditioning? It is really hot back here.
-driver: No! I decide the temperature in my own car, you stupid passenger.
-rider: Please, I am only asking you to turn it down a little. Why are you shouting at me?
-driver: Shut up and sit there! Keep arguing and I will find you after this trip!
+rider: I am not turning the AC lower, it is already freezing in here!
+rider: I paid for this ride, I should be comfortable!
+driver: Then get another car!

@@ -332,18 +332,52 @@ export default function Dashboard() {
         </Link>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Badge variant="outline" className="h-6 gap-1.5 font-mono text-[10px]">
+          <Badge
+            variant="outline"
+            className="h-6 gap-1.5 font-mono text-[10px]"
+            title={
+              health?.engine === "adp"
+                ? "LLM reasoner: live Tencent Cloud ADP — set ADP_APP_KEY in backend/.env to enable."
+                : "LLM reasoner: deterministic offline engine. Same ruling every run, no credential needed. Set ADP_APP_KEY to switch to live."
+            }
+          >
             <Server className="h-3 w-3" />
-            {health ? `engine: ${health.engine}` : "connecting…"}
+            {health ? `reasoner: ${health.engine}` : "reasoner: connecting…"}
           </Badge>
+          {health && !health.adp_configured && (
+            <Badge
+              variant="outline"
+              className="h-6 border-amber-500/30 bg-amber-500/10 font-mono text-[10px] text-amber-300"
+              title="Tencent Cloud ADP credentials are not set. The platform uses the deterministic offline reasoner so the demo always works."
+            >
+              ADP: offline (offline reasoner)
+            </Badge>
+          )}
           {kbSize !== null && (
             <Badge
               variant="outline"
               className="h-6 gap-1.5 border-lime-500/30 bg-lime-500/10 font-mono text-[10px] text-lime-300"
-              title="Policy & Precedent knowledge base"
+              title="Policy & Precedent knowledge base — grows every time a reviewer approves or overrides a ticket."
             >
               <BookMarked className="h-3 w-3" />
-              KB: {kbSize}
+              KB: {kbSize} precedents
+            </Badge>
+          )}
+          {health?.video_backend && (
+            <Badge
+              variant="outline"
+              className={
+                health.video_backend === "unavailable"
+                  ? "h-6 border-red-500/30 bg-red-500/10 font-mono text-[10px] text-red-300"
+                  : "h-6 border-violet-500/30 bg-violet-500/10 font-mono text-[10px] text-violet-300"
+              }
+              title={
+                health.video_backend === "unavailable"
+                  ? "No video backend is installed on this host — install ffmpeg or opencv-python to enable keyframe extraction."
+                  : `Keyframes are extracted with ${health.video_backend} at 1 fps.`
+              }
+            >
+              keyframes: {health.video_backend}
             </Badge>
           )}
           <Button

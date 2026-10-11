@@ -129,6 +129,26 @@ DISP_002: dict[str, Any] = {
         {"timestamp": "2026-09-13T08:51:00+08:00", "event_type": "cancellation_fee_applied", "details": "No-show threshold (8 min) reached. $5.00 cancellation fee charged to rider payment method (e-wallet)."},
         {"timestamp": "2026-09-13T08:51:05+08:00", "event_type": "driver_released", "details": "Driver D-2398 released from trip. Trip status: cancelled (rider_no_show)."},
     ],
+    "media_attachments": [
+        {
+            "attachment_id": "media-disp002-01",
+            "media_type": "image",
+            "url": "/assets/miora/disp002_no_show_chat.png",
+            "asset_key": "disp002_no_show_chat",
+            "uploaded_by": "driver",
+            "captured_at": "2026-09-13T08:50:00+08:00",
+            "device_model": "Samsung Galaxy S24",
+            "gps_lat": 1.2847,
+            "gps_lng": 103.8382,
+            "exif_present": True,
+            "ai_generated_probability": 0.06,
+            "caption": (
+                "Screenshot of the in-app chat showing the driver sent three lobby messages and "
+                "an unanswered call, with the 8-minute wait timer clearly expired; rider is "
+                "absent from the pickup lobby"
+            ),
+        }
+    ],
     "cancellation_policy": {
         "free_wait_time_min": 5,
         "cancellation_fee_after_wait": 5.00,
@@ -231,6 +251,27 @@ DISP_001: dict[str, Any] = {
         {"timestamp": "2026-09-14T18:53:00+08:00", "event_type": "trip_completed", "details": "Trip completed. 14.0 km, 38 min. Fare charged $28.00."},
         {"timestamp": "2026-09-14T19:05:00+08:00", "event_type": "dispute_filed", "details": "Rider filed a route deviation dispute requesting a $8.00 refund."},
     ],
+    "media_attachments": [
+        {
+            "attachment_id": "media-disp001-01",
+            "media_type": "image",
+            "url": "/assets/miora/disp001_route_deviation.png",
+            "asset_key": "disp001_route_deviation",
+            "uploaded_by": "rider",
+            "captured_at": "2026-09-14T19:02:00+08:00",
+            "device_model": "iPhone 14 Pro",
+            "gps_lat": 1.3300,
+            "gps_lng": 103.8900,
+            "exif_present": True,
+            "ai_generated_probability": 0.05,
+            "caption": (
+                "Screenshot of the in-app ride map showing the driver looped north through Toa "
+                "Payoh instead of the direct PIE/ETP route to Paya Lebar — the suggested route "
+                "in blue versus the actual GPS track in red clearly demonstrates an inefficient "
+                "deviation that added more than 5 km to the trip"
+            ),
+        }
+    ],
     "cancellation_policy": {
         "free_wait_time_min": 5,
         "cancellation_fee_after_wait": 5.00,
@@ -325,8 +366,12 @@ DISP_003: dict[str, Any] = {
             "gps_lat": 1.3521,
             "gps_lng": 103.9418,
             "exif_present": True,
-            "ai_generated_probability": 0.71,
-            "caption": "Alleged dirty rear seat — image shows a perfectly clean back seat with no stains",
+            "ai_generated_probability": 0.08,
+            "caption": (
+                "Alleged dirty rear seat — image shows a perfectly clean back seat with no "
+                "stains, spills or food residue; the rider disputes the $60 cleaning fee as "
+                "fabricated because the photograph depicts an undamaged cabin"
+            ),
         }
     ],
     "cancellation_policy": {
@@ -917,11 +962,13 @@ CASE_META: dict[str, dict[str, Any]] = {
     "DISP-006": {
         "title": "Safety Incident — verbal altercation on tape",
         "blurb": (
-            "Rider asks for a cooler cabin; the driver shouts back and insults her. The 8 s "
-            "covert recording is transcribed by TRTC ASR. HIGH — fast-tracked, always human-reviewed."
+            "Rider asks for the cabin temperature to be adjusted; the driver refuses sharply. "
+            "The 8 s covert recording is transcribed by TRTC ASR. HIGH — fast-tracked, always "
+            "human-reviewed."
         ),
         "expected_ruling": (
-            "ESCALATED TO HUMAN — transcript shows shouting, insults and a threat (hostility ~1.0)"
+            "ESCALATED TO HUMAN — heated cabin-temperature argument on tape (hostility high, "
+            "no explicit threat)"
         ),
         "financial_value": 22.00,
         "financial_note": "Fare charged, plus a goodwill voucher on review",

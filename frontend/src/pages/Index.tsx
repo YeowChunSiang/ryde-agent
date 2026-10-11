@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { AlertCircle, Cpu, Play, RotateCcw, Server } from "lucide-react";
+import { AlertCircle, Archive, CheckCircle2, Cpu, Play, RotateCcw, Server } from "lucide-react";
 
 import type {
   AgentEvent,
@@ -150,7 +150,18 @@ export default function Index() {
   };
 
   const activeCase = cases.find((c) => c.case_id === selected) ?? null;
+  const activeRecord = selected ? records[selected] : undefined;
   const cached = Boolean(selected && records[selected]?.result);
+  // Phase 3.2: once a human reviewer has approved or overridden a ticket,
+  // it is "archived". The cached result IS the version they signed off on —
+  // we must never offer a re-run that would replace it with a new arbitration.
+  const archived = Boolean(activeRecord?.review);
+  const reviewedAt = activeRecord?.review?.at;
+  const reviewedBy = activeRecord?.review?.reviewer_name;
+  const reviewedKind = activeRecord?.review?.kind;
+  const reviewedDateLabel = reviewedAt
+    ? new Date(reviewedAt).toISOString().slice(0, 10)
+    : null;
 
   if (!session) return null;
 
@@ -219,9 +230,17 @@ export default function Index() {
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Badge variant="outline" className="h-6 gap-1.5 font-mono text-[10px]">
+          <Badge
+            variant="outline"
+            className="h-6 gap-1.5 font-mono text-[10px]"
+            title={
+              health?.engine === "adp"
+                ? "LLM reasoner: live Tencent Cloud ADP — set ADP_APP_KEY in backend/.env to enable."
+                : "LLM reasoner: deterministic offline engine. Same ruling every run, no credential needed. Set ADP_APP_KEY to switch to live."
+            }
+          >
             <Server className="h-3 w-3" />
-            {health ? `engine: ${health.engine}` : "connecting…"}
+            {health ? `reasoner: ${health.engine}` : "reasoner: connecting…"}
           </Badge>
           {health && (
             <Badge
@@ -229,17 +248,22 @@ export default function Index() {
               className={
                 health.adp_configured
                   ? "h-6 border-emerald-500/30 bg-emerald-500/10 font-mono text-[10px] text-emerald-300"
-                  : "h-6 font-mono text-[10px] text-muted-foreground"
+                  : "h-6 border-amber-500/30 bg-amber-500/10 font-mono text-[10px] text-amber-300"
+              }
+              title={
+                health.adp_configured
+                  ? "Tencent Cloud ADP credentials present — live LLM inference enabled."
+                  : "Tencent Cloud ADP credentials are not set. The platform falls back to the deterministic offline reasoner so the demo always works."
               }
             >
-              {health.adp_configured ? "ADP connected" : "offline reasoner"}
+              ADP: {health.adp_configured ? "connected" : "offline (offline reasoner)"}
             </Badge>
           )}
           {library && (
             <Badge
               variant="outline"
               className="h-6 border-lime-500/30 bg-lime-500/10 font-mono text-[10px] text-lime-300"
-              title="Policy & Precedent knowledge base"
+              title="Policy & Precedent knowledge base — grows every time a reviewer approves or overrides a ticket."
             >
               KB: {library.length} precedents
             </Badge>
@@ -248,7 +272,11 @@ export default function Index() {
             <Badge
               variant="outline"
               className="h-6 border-sky-500/30 bg-sky-500/10 font-mono text-[10px] text-sky-300"
-              title="TRTC speech-to-text backend"
+              title={
+                health.asr_engine === "trtc"
+                  ? "Audio transcripts come from live Tencent Cloud TRTC ASR."
+                  : "Audio transcripts come from the deterministic offline simulator (set TRTC_SECRET_ID to switch to live)."
+              }
             >
               ASR: {health.asr_engine}
             </Badge>
@@ -256,21 +284,58 @@ export default function Index() {
           {health?.video_backend && (
             <Badge
               variant="outline"
-              className="h-6 border-violet-500/30 bg-violet-500/10 font-mono text-[10px] text-violet-300"
-              title="Keyframe extraction backend"
+              className={
+                health.video_backend === "unavailable"
+                  ? "h-6 border-red-500/30 bg-red-500/10 font-mono text-[10px] text-red-300"
+                  : "h-6 border-violet-500/30 bg-violet-500/10 font-mono text-[10px] text-violet-300"
+              }
+              title={
+                health.video_backend === "unavailable"
+                  ? "No video backend is installed on this host — install ffmpeg or opencv-python to enable keyframe extraction."
+                  : health.video_backend === "opencv"
+                    ? "Keyframes are extracted with OpenCV — used automatically when ffmpeg is not installed."
+                    : "Keyframes are extracted with ffmpeg at 1 fps for the Judge and reviewer."
+              }
             >
-              frames: {health.video_backend}
+              keyframes: {health.video_backend}
             </Badge>
           )}
           <ReviewerNav />
-          <Button onClick={run} disabled={!selected || streaming} size="sm" className="h-8">
-            {cached && !streaming ? (
-              <RotateCcw className="h-3.5 w-3.5" />
-            ) : (
-              <Play className="h-3.5 w-3.5" />
-            )}
-            {streaming ? "Arbitrating…" : cached ? "Re-run Arbitration" : "Run Arbitration"}
-          </Button>
+          {archived ? (
+            <Badge
+              variant="outline"
+              className="h-8 gap-1.5 border-emerald-500/30 bg-emerald-500/10 px-2.5 font-mono text-[11px] text-emerald-300"
+              title={`This case was closed by ${reviewedBy ?? "—"} on ${reviewedDateLabel ?? "—"}. The arbitration below is the version the reviewer signed off on — it cannot be re-run.`}
+            >
+              {reviewedKind === "overridden" ? (
+                <Archive className="h-3.5 w-3.5" />
+              ) : (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              )}
+              {reviewedKind === "overridden" ? "Overridden" : "Approved"} by{" "}
+              {reviewedBy ?? "—"}
+              {reviewedDateLabel ? ` · ${reviewedDateLabel}` : ""}
+            </Badge>
+          ) : (
+            <Button
+              onClick={run}
+              disabled={!selected || streaming}
+              size="sm"
+              className="h-8"
+              title={
+                archived
+                  ? "This case has already been reviewed and is locked."
+                  : undefined
+              }
+            >
+              {cached && !streaming ? (
+                <RotateCcw className="h-3.5 w-3.5" />
+              ) : (
+                <Play className="h-3.5 w-3.5" />
+              )}
+              {streaming ? "Arbitrating…" : cached ? "Re-run Arbitration" : "Run Arbitration"}
+            </Button>
+          )}
         </div>
       </header>
 
