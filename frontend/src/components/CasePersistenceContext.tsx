@@ -41,7 +41,7 @@ import type {
 } from "@/types";
 import { login as loginRequest } from "@/lib/api";
 
-const STORE_KEY = "ryderesolve.case-store.v2";
+const STORE_KEY = "ryderesolve.case-store.v3";
 
 /** Cap the replay log so a long session can never exhaust the 5 MB budget. */
 const MAX_EVENTS = 400;
@@ -121,6 +121,28 @@ function loadStore(): CaseStore {
   const clean: CaseStore = {};
   for (const [caseId, record] of Object.entries(raw)) {
     if (!record || typeof record !== "object") continue;
+
+    const updatedAt = record.updated_at ?? new Date().toISOString();
+    const legacyReview = record.review as ReviewerAction | null;
+    const normalizedReview: ReviewerAction | null = legacyReview
+      ? legacyReview.kind === "baseline"
+        ? {
+            ...legacyReview,
+            kind: "approved" as const,
+            reviewer_id: legacyReview.reviewer_id || "reviewer-01",
+            reviewer_name: legacyReview.reviewer_name || "Wei Lin Chua",
+            note:
+              legacyReview.note && legacyReview.note.trim().length > 0
+                ? legacyReview.note
+                : `Approved by ${legacyReview.reviewer_name || "Wei Lin Chua"}.`,
+            at: legacyReview.at ?? updatedAt,
+          }
+        : {
+            ...legacyReview,
+            at: legacyReview.at ?? updatedAt,
+          }
+      : null;
+
     clean[caseId] = {
       case_id: caseId,
       run_id: record.run_id ?? null,
@@ -131,9 +153,9 @@ function loadStore(): CaseStore {
           : record.status ?? "idle",
       events: Array.isArray(record.events) ? record.events : [],
       result: record.result ?? null,
-      review: record.review ?? null,
+      review: normalizedReview,
       error: record.error ?? null,
-      updated_at: record.updated_at ?? new Date().toISOString(),
+      updated_at: updatedAt,
     };
   }
   return clean;

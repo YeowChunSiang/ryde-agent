@@ -724,20 +724,49 @@ class Orchestrator:
 
     async def _apply_escalation(self, run: Run, ruling: Ruling) -> None:
         reasons: list[str] = []
-        if ruling.escalation_reason:
+        dispute_type = run.case.dispute_type.value
+        is_safety_case = dispute_type == "safety_incident"
+
+        incident_text = " ".join(
+            [run.case.dispute_ticket.description]
+            + [e.details for e in run.case.app_events if e.details]
+        ).lower()
+        sexual_harassment_signal = any(
+            token in incident_text
+            for token in (
+                "sexual harass",
+                "physical/sexual harassment",
+                "molest",
+                "grop",
+                "touched my thigh",
+            )
+        )
+
+        # Product rule: only safety disputes are escalated. Non-safety disputes
+        # stay in the reviewer queue even when confidence is low.
+        if is_safety_case and ruling.escalation_reason:
             reasons.append(ruling.escalation_reason)
 
-        mandatory = run.case.dispute_type.value in self.settings.auto_escalate_dispute_types
+        mandatory = (
+            is_safety_case
+            and dispute_type in self.settings.auto_escalate_dispute_types
+        )
+        if sexual_harassment_signal:
+            mandatory = True
+
         if mandatory:
-            # The category rule is the authoritative reason, so skip the
-            # judge-level "declined to rule" phrasing — saying both is noise.
-            reasons.append(
-                f"{run.case.dispute_type.value.replace('_', ' ')} disputes always require human review."
-            )
-        elif ruling.decision == Decision.ESCALATE_TO_HUMAN and not ruling.escalation_reason:
+            if sexual_harassment_signal:
+                reasons.append(
+                    "Sexual-harassment allegations are treated as critical safety incidents and always require immediate human review."
+                )
+            else:
+                reasons.append(
+                    f"{dispute_type.replace('_', ' ')} disputes always require human review."
+                )
+        elif is_safety_case and ruling.decision == Decision.ESCALATE_TO_HUMAN and not ruling.escalation_reason:
             reasons.append("The Judge declined to issue an autonomous ruling for this category.")
 
-        if ruling.confidence < self.settings.confidence_escalation_threshold:
+        if is_safety_case and ruling.confidence < self.settings.confidence_escalation_threshold:
             reasons.append(
                 f"Confidence {ruling.confidence:.0%} is below the "
                 f"{self.settings.confidence_escalation_threshold:.0%} autonomy threshold."
@@ -747,11 +776,17 @@ class Orchestrator:
                 ruling.amount = 0.0
 
         if not reasons:
+            ruling.escalated = False
+            ruling.escalation_reason = None
+            run.result.escalation = None
             await run.emit(
                 AgentRole.ESCALATION,
                 "escalation_check",
-                f"Confidence {ruling.confidence:.0%} clears the autonomy threshold — ruling is "
-                "issued autonomously, no human review required.",
+                (
+                    f"Confidence {ruling.confidence:.0%} clears the autonomy threshold — ruling is issued autonomously, no human review required."
+                    if is_safety_case
+                    else "Only safety disputes are escalated. This ticket stays in the reviewer queue for normal human approval/override."
+                ),
             )
             return
 

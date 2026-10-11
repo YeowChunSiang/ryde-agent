@@ -124,26 +124,26 @@ export default function Dashboard() {
     }
   }, []);
 
-  // Seed the History tab with the pre-automation tickets so the audit view is
-  // never empty on a first visit.
+  // Seed Archived with legacy tickets as reviewer-approved records so they use
+  // the same audit language and timestamp semantics as normal human reviews.
   useEffect(() => {
-    if (!cases.length) return;
+    if (!cases.length || !session) return;
     for (const c of cases) {
       if (c.intake !== "historical") continue;
       seedBaseline(c.case_id, {
-        kind: "baseline",
-        reviewer_id: "legacy-ops",
-        reviewer_name: "Legacy ops desk",
-        note: "Adjudicated before the agent platform — retained as the baseline verdict.",
-        original_decision: null,
-        original_amount: 0,
+        kind: "approved",
+        reviewer_id: session.reviewer_id,
+        reviewer_name: session.name,
+        note: `Approved by ${session.name}.`,
+        original_decision: c.expected_ruling,
+        original_amount: c.financial_value ?? 0,
         final_decision: c.expected_ruling,
         final_amount: c.financial_value ?? 0,
-        at: null,
+        at: new Date().toISOString(),
         knowledge_base_size: kbSize ?? 0,
       });
     }
-  }, [cases, seedBaseline, kbSize]);
+  }, [cases, seedBaseline, kbSize, session]);
 
   // --- background arbitration -------------------------------------------
   const runOne = useCallback(

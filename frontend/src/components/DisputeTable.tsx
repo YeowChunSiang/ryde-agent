@@ -5,7 +5,6 @@ import {
   ExternalLink,
   Gavel,
   Loader2,
-  ShieldAlert,
 } from "lucide-react";
 
 import type {
@@ -208,26 +207,59 @@ export function DisputeTable({
 
             {/* ---- case -------------------------------------------------- */}
             <TableCell className="py-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="font-mono text-xs font-semibold">{row.case_id}</span>
-                <span className="font-mono text-[10px] text-muted-foreground">
-                  {row.dispute_id}
-                </span>
-              </div>
-              <p className="mt-1 max-w-[22rem] whitespace-normal break-words text-xs font-medium leading-relaxed">
-                {row.title}
-              </p>
-              <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                <Badge
-                  variant="outline"
-                  className="h-4 px-1 text-[10px] font-normal text-muted-foreground"
+              {mode === "history" && onReview ? (
+                <button
+                  type="button"
+                  onClick={() => onReview(row)}
+                  className="w-full rounded-md border border-border/60 bg-card/30 px-2 py-1.5 text-left transition-colors hover:border-primary/40 hover:bg-card"
+                  title="Open archived case for review"
                 >
-                  {titleCase(row.dispute_type)}
-                </Badge>
-                <span className="text-[10px] text-muted-foreground">
-                  filed by {row.filed_by}
-                </span>
-              </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-mono text-xs font-semibold">{row.case_id}</span>
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      {row.dispute_id}
+                    </span>
+                  </div>
+                  <p className="mt-1 max-w-[22rem] whitespace-normal break-words text-xs font-medium leading-relaxed">
+                    {row.title}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <Badge
+                      variant="outline"
+                      className="h-4 px-1 text-[10px] font-normal text-muted-foreground"
+                    >
+                      {titleCase(row.dispute_type)}
+                    </Badge>
+                    <span className="text-[10px] text-muted-foreground">
+                      filed by {row.filed_by}
+                    </span>
+                    <span className="text-[10px] text-primary/80">click to review</span>
+                  </div>
+                </button>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-mono text-xs font-semibold">{row.case_id}</span>
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      {row.dispute_id}
+                    </span>
+                  </div>
+                  <p className="mt-1 max-w-[22rem] whitespace-normal break-words text-xs font-medium leading-relaxed">
+                    {row.title}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <Badge
+                      variant="outline"
+                      className="h-4 px-1 text-[10px] font-normal text-muted-foreground"
+                    >
+                      {titleCase(row.dispute_type)}
+                    </Badge>
+                    <span className="text-[10px] text-muted-foreground">
+                      filed by {row.filed_by}
+                    </span>
+                  </div>
+                </>
+              )}
             </TableCell>
 
             {mode === "queue" ? (
@@ -343,12 +375,12 @@ export function DisputeTable({
                     >
                       overridden
                     </Badge>
-                  ) : row.review?.kind === "approved" ? (
+                  ) : row.review ? (
                     <Badge
                       variant="outline"
                       className="h-5 border-emerald-500/40 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-300"
                     >
-                      human verified
+                      approved
                     </Badge>
                   ) : (
                     <Badge
@@ -375,17 +407,11 @@ export function DisputeTable({
                       <div className="flex items-center gap-1.5">
                         {row.review.kind === "overridden" ? (
                           <Gavel className="h-3 w-3 text-lime-300" />
-                        ) : row.review.kind === "approved" ? (
-                          <CheckCircle2 className="h-3 w-3 text-emerald-300" />
                         ) : (
-                          <ShieldAlert className="h-3 w-3 text-zinc-400" />
+                          <CheckCircle2 className="h-3 w-3 text-emerald-300" />
                         )}
                         <span className="text-xs font-medium">
-                          {row.review.kind === "overridden"
-                            ? "Override"
-                            : row.review.kind === "approved"
-                              ? "Approved"
-                              : "Pre-automation baseline"}
+                          {row.review.kind === "overridden" ? "Override" : "Approved"}
                         </span>
                       </div>
                       <p className="mt-1 text-[10px] leading-none text-muted-foreground">

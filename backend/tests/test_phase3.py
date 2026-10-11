@@ -441,6 +441,20 @@ def test_video_pipeline_flags_the_harassment_recording(client):
     assert "law enforcement" in focus or "law-enforcement" in focus or "police" in focus
 
 
+def test_property_damage_never_escalates_to_human(client):
+    """Product rule: only safety disputes may be escalated.
+
+    Property-damage disputes still require human approval/override in the UI,
+    but must not enter the escalation packet flow.
+    """
+    for case_id in ("DISP-003", "DISP-004"):
+        r = _resolve(client, case_id)
+        assert r["dispute_type"] == "property_damage"
+        assert r["status"] == "resolved"
+        assert r["ruling"]["escalated"] is False
+        assert r["escalation"] is None
+
+
 # ---------------------------------------------------------------------------
 # 5. Case registry + Miora asset bindings
 # ---------------------------------------------------------------------------
