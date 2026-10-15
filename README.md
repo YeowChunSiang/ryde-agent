@@ -73,6 +73,18 @@ frontend/
 
 ### 1. Backend
 
+If your terminal is in the parent folder that contains `ryde-agent` (for
+example, `D:\vscode projs\tencenthackathon`), use these PowerShell commands:
+
+```powershell
+cd .\ryde-agent\backend
+python -m pip install -r requirements.txt
+if (-not (Test-Path .env)) { Copy-Item .env.example .env } # optional
+python -m uvicorn main:app --host 0.0.0.0 --port 3000
+```
+
+Otherwise, run the following from the `ryde-agent` project root:
+
 ```bash
 cd backend
 pip install -r requirements.txt
@@ -340,6 +352,9 @@ work without any external network calls.
 | `AUTO_ESCALATE_DISPUTE_TYPES`    | `safety_incident` | Comma-separated dispute types always escalated |
 | `OFFLINE_DEMO_PACING_MS`         | `220`   | Per-step delay for the offline reasoner (demo only) |
 | `SLA_HIGH_VALUE_THRESHOLD`       | `50`    | Claim amount (SGD) that promotes a ticket to HIGH |
+| `ROUTE_TRAFFIC_JUSTIFIED_RATIO`  | `0.30`  | Fraction of fare overcharge assumed justified by verified traffic |
+| `ROUTE_UNJUSTIFIED_RATIO`        | `0.15`  | Fraction of fare overcharge forgiven as operational tolerance |
+| `MAX_UPLOAD_SIZE_MB`             | `50`    | Maximum accepted upload size (audio/video/image) |
 | `COLLECTION_SIMULATE_LATENCY`    | `true`  | Emulate upstream API round-trips in the collection agent |
 | `COLLECTION_BASE_LATENCY_MS`     | `40`    | Base latency per upstream call                   |
 | `COLLECTION_JITTER_MS`           | `90`    | Random jitter added per upstream call            |

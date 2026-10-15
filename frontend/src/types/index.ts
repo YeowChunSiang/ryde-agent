@@ -357,7 +357,8 @@ export type CaseRunStatus =
   | "awaiting_review"
   | "resolved"
   | "escalated"
-  | "failed";
+  | "failed"
+  | "reopened";
 
 /**
  * Closing entry of a reviewed ticket — either a human verification (approve),

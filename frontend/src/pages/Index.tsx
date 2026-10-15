@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { AlertCircle, Archive, CheckCircle2, Cpu, Play, RotateCcw, Server } from "lucide-react";
+import { AlertCircle, Archive, CheckCircle2, Cpu, Play, RotateCcw, Server, Unlock } from "lucide-react";
 
 import type {
   AgentEvent,
@@ -22,6 +22,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { toast } from "sonner";
 import { CaseRail } from "@/components/CaseRail";
 import { PipelineRail } from "@/components/PipelineRail";
 import { AgentStream } from "@/components/AgentStream";
@@ -33,6 +35,7 @@ import { EscalationPanel } from "@/components/EscalationPanel";
 import { ReviewerNav } from "@/components/ReviewerNav";
 import { useCaseStore } from "@/components/CasePersistenceContext";
 import { titleCase } from "@/components/agent-meta";
+import { cn } from "@/lib/utils";
 
 export default function Index() {
   const navigate = useNavigate();
@@ -56,6 +59,7 @@ export default function Index() {
     failRun,
     recordApproval,
     recordOverride,
+    reopenCase,
   } = useCaseStore();
 
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -149,13 +153,30 @@ export default function Index() {
     }
   };
 
+  /** Re-open a closed ticket so the reviewer can approve or override again. */
+  const onReopen = () => {
+    if (!selected) return;
+    const current = recordsRef.current[selected];
+    reopenCase(selected);
+    // Use the current record before clearing — the result is preserved by
+    // reopenCase (only approval/override are nulled), so we can keep showing it.
+    setResult(current?.result ?? null);
+    setEvents(current?.events ?? []);
+    setTab("verdict");
+    toast.success(`Case ${selected} has been re-opened`, {
+      description: "You can now re-run arbitration or override the previous ruling.",
+    });
+  };
+
   const activeCase = cases.find((c) => c.case_id === selected) ?? null;
   const activeRecord = selected ? records[selected] : undefined;
   const cached = Boolean(selected && records[selected]?.result);
+  const reopened = activeRecord?.status === "reopened";
   // Phase 3.2: once a human reviewer has approved or overridden a ticket,
   // it is "archived". The cached result IS the version they signed off on —
   // we must never offer a re-run that would replace it with a new arbitration.
-  const archived = Boolean(activeRecord?.review);
+  // A re-opened ticket is NOT archived — the reviewer can re-run or override.
+  const archived = Boolean(activeRecord?.review) && !reopened;
   const reviewedAt = activeRecord?.review?.at;
   const reviewedBy = activeRecord?.review?.reviewer_name;
   const reviewedKind = activeRecord?.review?.kind;
@@ -230,92 +251,108 @@ export default function Index() {
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Badge
-            variant="outline"
-            className="h-6 gap-1.5 font-mono text-[10px]"
-            title={
-              health?.engine === "adp"
-                ? "LLM reasoner: live Tencent Cloud ADP — set ADP_APP_KEY in backend/.env to enable."
-                : "LLM reasoner: deterministic offline engine. Same ruling every run, no credential needed. Set ADP_APP_KEY to switch to live."
-            }
-          >
-            <Server className="h-3 w-3" />
-            {health ? `reasoner: ${health.engine}` : "reasoner: connecting…"}
-          </Badge>
-          {health && (
-            <Badge
-              variant="outline"
-              className={
-                health.adp_configured
-                  ? "h-6 border-emerald-500/30 bg-emerald-500/10 font-mono text-[10px] text-emerald-300"
-                  : "h-6 border-amber-500/30 bg-amber-500/10 font-mono text-[10px] text-amber-300"
-              }
-              title={
-                health.adp_configured
-                  ? "Tencent Cloud ADP credentials present — live LLM inference enabled."
-                  : "Tencent Cloud ADP credentials are not set. The platform falls back to the deterministic offline reasoner so the demo always works."
-              }
-            >
-              ADP: {health.adp_configured ? "connected" : "offline (offline reasoner)"}
-            </Badge>
-          )}
-          {library && (
-            <Badge
-              variant="outline"
-              className="h-6 border-lime-500/30 bg-lime-500/10 font-mono text-[10px] text-lime-300"
-              title="Policy & Precedent knowledge base — grows every time a reviewer approves or overrides a ticket."
-            >
-              KB: {library.length} precedents
-            </Badge>
-          )}
-          {health?.asr_engine && (
-            <Badge
-              variant="outline"
-              className="h-6 border-sky-500/30 bg-sky-500/10 font-mono text-[10px] text-sky-300"
-              title={
-                health.asr_engine === "trtc"
-                  ? "Audio transcripts come from live Tencent Cloud TRTC ASR."
-                  : "Audio transcripts come from the deterministic offline simulator (set TRTC_SECRET_ID to switch to live)."
-              }
-            >
-              ASR: {health.asr_engine}
-            </Badge>
-          )}
-          {health?.video_backend && (
-            <Badge
-              variant="outline"
-              className={
-                health.video_backend === "unavailable"
-                  ? "h-6 border-red-500/30 bg-red-500/10 font-mono text-[10px] text-red-300"
-                  : "h-6 border-violet-500/30 bg-violet-500/10 font-mono text-[10px] text-violet-300"
-              }
-              title={
-                health.video_backend === "unavailable"
-                  ? "No video backend is installed on this host — install ffmpeg or opencv-python to enable keyframe extraction."
-                  : health.video_backend === "opencv"
-                    ? "Keyframes are extracted with OpenCV — used automatically when ffmpeg is not installed."
-                    : "Keyframes are extracted with ffmpeg at 1 fps for the Judge and reviewer."
-              }
-            >
-              keyframes: {health.video_backend}
-            </Badge>
-          )}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
+                <Server className="h-3.5 w-3.5" />
+                System
+                {health && !health.adp_configured && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80 p-3">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                System Status
+              </p>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Server className="h-3 w-3 shrink-0" />
+                  <span className="text-xs">
+                    {health ? `reasoner: ${health.engine}` : "reasoner: connecting…"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      health?.adp_configured ? "bg-emerald-400" : "bg-amber-400",
+                    )}
+                  />
+                  <span className="text-xs">
+                    {health ? `ADP: ${health.adp_configured ? "connected" : "offline (offline reasoner)"}` : "ADP: —"}
+                  </span>
+                </div>
+                {library && (
+                  <div className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 rounded-full bg-lime-400" />
+                    <span className="text-xs">
+                      KB: {library.length} precedents
+                    </span>
+                  </div>
+                )}
+                {health?.asr_engine && (
+                  <div className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+                    <span className="text-xs">
+                      ASR: {health.asr_engine}
+                    </span>
+                  </div>
+                )}
+                {health?.video_backend && (
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        health.video_backend === "unavailable"
+                          ? "bg-red-400"
+                          : "bg-violet-400",
+                      )}
+                    />
+                    <span className="text-xs">
+                      keyframes: {health.video_backend}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
           <ReviewerNav />
-          {archived ? (
+          {reopened ? (
             <Badge
               variant="outline"
-              className="h-8 gap-1.5 border-emerald-500/30 bg-emerald-500/10 px-2.5 font-mono text-[11px] text-emerald-300"
-              title={`This case was closed by ${reviewedBy ?? "—"} on ${reviewedDateLabel ?? "—"}. The arbitration below is the version the reviewer signed off on — it cannot be re-run.`}
+              className="h-8 gap-1.5 border-amber-500/40 bg-amber-500/10 px-2.5 font-mono text-[11px] text-amber-300"
+              title="This case was manually re-opened. You can re-run arbitration or override the previous ruling."
             >
-              {reviewedKind === "overridden" ? (
-                <Archive className="h-3.5 w-3.5" />
-              ) : (
-                <CheckCircle2 className="h-3.5 w-3.5" />
-              )}
-              {reviewedKind === "overridden" ? "Overridden" : "Approved"} by{" "}
-              {reviewedBy ?? "—"}
-              {reviewedDateLabel ? ` · ${reviewedDateLabel}` : ""}
+              <Unlock className="h-3.5 w-3.5" />
+              Re-opened
             </Badge>
+          ) : archived ? (
+            <div className="flex items-center gap-2">
+              <Badge
+                variant="outline"
+                className="h-8 gap-1.5 border-emerald-500/30 bg-emerald-500/10 px-2.5 font-mono text-[11px] text-emerald-300"
+                title={`This case was closed by ${reviewedBy ?? "—"} on ${reviewedDateLabel ?? "—"}. The arbitration below is the version the reviewer signed off on.`}
+              >
+                {reviewedKind === "overridden" ? (
+                  <Archive className="h-3.5 w-3.5" />
+                ) : (
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                )}
+                {reviewedKind === "overridden" ? "Overridden" : "Approved"} by{" "}
+                {reviewedBy ?? "—"}
+                {reviewedDateLabel ? ` · ${reviewedDateLabel}` : ""}
+              </Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 border-amber-500/40 text-amber-300"
+                onClick={onReopen}
+              >
+                <Unlock className="h-3.5 w-3.5" />
+                Reopen
+              </Button>
+            </div>
           ) : (
             <Button
               onClick={run}
@@ -398,16 +435,16 @@ export default function Index() {
               <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
                 <div className="border-b border-border px-4 py-2.5">
                   <TabsList className="grid w-full grid-cols-4">
-                    <TabsTrigger value="evidence" className="px-1 text-xs">
+                    <TabsTrigger value="evidence" className="px-1 text-[11px]">
                       Evidence
                     </TabsTrigger>
-                    <TabsTrigger value="risk" className="px-1 text-xs">
-                      Risk & RAG
+                    <TabsTrigger value="risk" className="px-1 text-[11px]">
+                      Risk
                     </TabsTrigger>
-                    <TabsTrigger value="arguments" className="px-1 text-xs">
+                    <TabsTrigger value="arguments" className="px-1 text-[11px]">
                       Arguments
                     </TabsTrigger>
-                    <TabsTrigger value="verdict" className="text-xs">
+                    <TabsTrigger value="verdict" className="text-[11px]">
                       Verdict
                     </TabsTrigger>
                   </TabsList>
@@ -447,6 +484,7 @@ export default function Index() {
                       onApproved={onApproved}
                       reviewerId={session?.reviewer_id ?? "reviewer-01"}
                       reviewerName={session?.name ?? "Reviewer"}
+                      token={session?.token}
                     />
                   </TabsContent>
                 </div>

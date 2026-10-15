@@ -67,6 +67,23 @@ class Settings(BaseModel):
         description="Claimed amount (SGD) above which a ticket is promoted to HIGH priority",
     )
 
+    # --- Route deviation refund policy ----------------------------------------
+    route_traffic_justified_ratio: float = Field(
+        default=0.30,
+        description=(
+            "Demo policy assumption: the fraction of fare overcharge that verified "
+            "traffic is assumed to justify. This is a fixed heuristic, not a calculation "
+            "from measured congestion severity."
+        ),
+    )
+    route_unjustified_ratio: float = Field(
+        default=0.15,
+        description=(
+            "Demo policy assumption: the fraction of fare overcharge that is forgiven "
+            "even when no traffic evidence exists (operational tolerance)."
+        ),
+    )
+
     # --- Evidence Collection Agent ------------------------------------------
     collection_simulate_latency: bool = Field(
         default=True, description="Sleep to emulate upstream API round-trips"
@@ -112,6 +129,12 @@ class Settings(BaseModel):
         default=12, description="Hard cap on keyframes analysed per video attachment"
     )
 
+    # --- Upload hardening ---------------------------------------------------
+    max_upload_size_mb: float = Field(
+        default=50.0,
+        description="Maximum accepted upload size in MB (audio/video/image)",
+    )
+
     # --- Service -----------------------------------------------------------
     host: str = "0.0.0.0"
     port: int = 3000
@@ -150,6 +173,8 @@ def get_settings() -> Settings:
             "AUTO_ESCALATE_DISPUTE_TYPES", ("safety_incident",)
         ),
         sla_high_value_threshold=float(os.getenv("SLA_HIGH_VALUE_THRESHOLD", "50")),
+        route_traffic_justified_ratio=float(os.getenv("ROUTE_TRAFFIC_JUSTIFIED_RATIO", "0.30")),
+        route_unjustified_ratio=float(os.getenv("ROUTE_UNJUSTIFIED_RATIO", "0.15")),
         collection_simulate_latency=os.getenv("COLLECTION_SIMULATE_LATENCY", "1") not in (
             "0",
             "false",
@@ -179,6 +204,7 @@ def get_settings() -> Settings:
         ),
         video_frame_fps=float(os.getenv("VIDEO_FRAME_FPS", "1")),
         video_max_frames=int(os.getenv("VIDEO_MAX_FRAMES", "12")),
+        max_upload_size_mb=float(os.getenv("MAX_UPLOAD_SIZE_MB", "50")),
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "3000")),
         log_level=os.getenv("LOG_LEVEL", "info"),

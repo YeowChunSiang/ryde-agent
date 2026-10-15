@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -94,6 +94,41 @@ REVIEWER_ACCOUNTS: dict[str, dict[str, str]] = {
         "role": "dispute_reviewer",
     }
 }
+
+#: In-memory store of active reviewer tokens issued by /login.
+#: A hackathon-only measure — a real deployment replaces this with an
+#: identity-provider-issued JWT or session cookie.
+_active_reviewer_tokens: dict[str, str] = {}
+
+
+def _verify_reviewer(
+    authorization: Optional[str] = Header(default=None),
+) -> str:
+    """Dependency: extract and verify the reviewer token, return reviewer_id.
+
+    Tokens are issued by POST /login and tracked in-memory.  The reviewer_id
+    on the token must match the reviewer_id in the request body — this
+    prevents one logged-in reviewer from impersonating another.
+    """
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing Authorization header — reviewer authentication required.",
+        )
+    parts = authorization.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid Authorization header — expected 'Bearer <token>'.",
+        )
+    token = parts[1].strip()
+    reviewer_id = _active_reviewer_tokens.get(token)
+    if reviewer_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired reviewer token.",
+        )
+    return reviewer_id
 
 
 @asynccontextmanager
@@ -262,13 +297,19 @@ async def upload_audio(
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Empty audio payload")
+    try:
+        media_store.validate_size(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     kind = media_type_for(file.filename or "clip.wav")
     if kind != "audio":
         raise HTTPException(
             status_code=415, detail=f"'{file.filename}' is not an audio payload"
         )
-
-    saved = media_store.save(file.filename or "clip.wav", raw, "audio")
+    try:
+        saved = media_store.save(file.filename or "clip.wav", raw, "audio")
+    except ValueError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
     duration = probe_audio_duration(saved)
 
     attachment = MediaAttachment(
@@ -343,13 +384,19 @@ async def upload_image(
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Empty image payload")
+    try:
+        media_store.validate_size(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     kind = media_type_for(file.filename or "evidence.png")
     if kind != "image":
         raise HTTPException(
             status_code=415, detail=f"'{file.filename}' is not an image payload"
         )
-
-    saved = media_store.save(file.filename or "evidence.png", raw, "image")
+    try:
+        saved = media_store.save(file.filename or "evidence.png", raw, "image")
+    except ValueError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
     attachment = MediaAttachment(
         media_type="image",
         url=media_store.web_path(saved),
@@ -417,13 +464,19 @@ async def upload_video(
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Empty video payload")
+    try:
+        media_store.validate_size(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     kind = media_type_for(file.filename or "clip.mp4")
     if kind != "video":
         raise HTTPException(
             status_code=415, detail=f"'{file.filename}' is not a video payload"
         )
-
-    saved = media_store.save(file.filename or "clip.mp4", raw, "video")
+    try:
+        saved = media_store.save(file.filename or "clip.mp4", raw, "video")
+    except ValueError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
     attachment = MediaAttachment(
         media_type="video",
         url=media_store.web_path(saved),
@@ -573,9 +626,11 @@ async def login(payload: LoginRequest) -> LoginAccepted:
     reviewer = REVIEWER_ACCOUNTS.get(payload.email.strip().lower())
     if reviewer is None or reviewer["password"] != payload.password:
         raise HTTPException(status_code=401, detail="Invalid reviewer credentials")
+    token = f"ryde-reviewer-{uuid.uuid4().hex}"
+    _active_reviewer_tokens[token] = reviewer["reviewer_id"]
     logger.info("reviewer %s signed in", reviewer["reviewer_id"])
     return LoginAccepted(
-        token=f"ryde-reviewer-{uuid.uuid4().hex}",
+        token=token,
         reviewer_id=reviewer["reviewer_id"],
         name=reviewer["name"],
         role=reviewer["role"],
@@ -583,7 +638,11 @@ async def login(payload: LoginRequest) -> LoginAccepted:
 
 
 @app.post("/approve/{run_id}", response_model=ApprovalAccepted)
-async def approve_run(run_id: str, payload: ApproveRequest) -> ApprovalAccepted:
+async def approve_run(
+    run_id: str,
+    payload: ApproveRequest,
+    token_reviewer_id: str = Depends(_verify_reviewer),
+) -> ApprovalAccepted:
     """Reviewer confirms the agent ruling and closes the dispute.
 
     The mirror image of the override path: approving writes a human
@@ -591,6 +650,11 @@ async def approve_run(run_id: str, payload: ApproveRequest) -> ApprovalAccepted:
     deliberately does *not* add a precedent — the knowledge base only learns
     from decisions that correct the agents.
     """
+    if payload.reviewer_id != token_reviewer_id:
+        raise HTTPException(
+            status_code=403,
+            detail="reviewer_id in the request body does not match the authenticated token.",
+        )
     result = await orchestrator.apply_approval(run_id, payload)
     if result is None or result.approval is None:
         raise HTTPException(status_code=404, detail=f"Unknown run '{run_id}'")
@@ -605,7 +669,11 @@ async def approve_run(run_id: str, payload: ApproveRequest) -> ApprovalAccepted:
 
 
 @app.post("/override/{run_id}", response_model=OverrideAccepted)
-async def override_run(run_id: str, payload: OverrideRequest) -> OverrideAccepted:
+async def override_run(
+    run_id: str,
+    payload: OverrideRequest,
+    token_reviewer_id: str = Depends(_verify_reviewer),
+) -> OverrideAccepted:
     """Human reviewer overrides an escalated ruling.
 
     The correction is captured and injected back into the Policy & Precedent
@@ -613,6 +681,11 @@ async def override_run(run_id: str, payload: OverrideRequest) -> OverrideAccepte
     arbitrated against what the reviewer actually decided. That closes the
     loop from human judgement back into autonomous arbitration.
     """
+    if payload.reviewer_id != token_reviewer_id:
+        raise HTTPException(
+            status_code=403,
+            detail="reviewer_id in the request body does not match the authenticated token.",
+        )
     result = await orchestrator.apply_override(run_id, payload)
     if result is None or result.override is None:
         raise HTTPException(status_code=404, detail=f"Unknown run '{run_id}'")
@@ -712,8 +785,17 @@ async def api_result(run_id: str) -> ResolutionResult:
 
 
 @app.post("/api/override/{run_id}", response_model=OverrideAccepted)
-async def api_override_run(run_id: str, payload: OverrideRequest) -> OverrideAccepted:
-    return await override_run(run_id, payload)
+async def api_override_run(
+    run_id: str,
+    payload: OverrideRequest,
+    token_reviewer_id: str = Depends(_verify_reviewer),
+) -> OverrideAccepted:
+    if payload.reviewer_id != token_reviewer_id:
+        raise HTTPException(
+            status_code=403,
+            detail="reviewer_id in the request body does not match the authenticated token.",
+        )
+    return await override_run(run_id, payload, token_reviewer_id)
 
 
 @app.post("/api/login", response_model=LoginAccepted)
@@ -722,8 +804,17 @@ async def api_login(payload: LoginRequest) -> LoginAccepted:
 
 
 @app.post("/api/approve/{run_id}", response_model=ApprovalAccepted)
-async def api_approve_run(run_id: str, payload: ApproveRequest) -> ApprovalAccepted:
-    return await approve_run(run_id, payload)
+async def api_approve_run(
+    run_id: str,
+    payload: ApproveRequest,
+    token_reviewer_id: str = Depends(_verify_reviewer),
+) -> ApprovalAccepted:
+    if payload.reviewer_id != token_reviewer_id:
+        raise HTTPException(
+            status_code=403,
+            detail="reviewer_id in the request body does not match the authenticated token.",
+        )
+    return await approve_run(run_id, payload, token_reviewer_id)
 
 
 @app.get("/api/precedents")

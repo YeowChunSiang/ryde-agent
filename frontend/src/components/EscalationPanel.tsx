@@ -32,6 +32,8 @@ interface Props {
   /** Signed-in reviewer — falls back to the demo identity. */
   reviewerId?: string;
   reviewerName?: string;
+  /** Reviewer session token — required for approve/override API calls. */
+  token?: string;
   /** Render only the action row (used by the reviewer board). */
   actionsOnly?: boolean;
 }
@@ -62,6 +64,7 @@ export function EscalationPanel({
   onApproved,
   reviewerId = "reviewer-01",
   reviewerName = "Reviewer",
+  token,
   actionsOnly = false,
 }: Props) {
   const [note, setNote] = useState("");
@@ -80,7 +83,7 @@ export function EscalationPanel({
       const accepted = await submitApproval(result.run_id, {
         reviewer_id: reviewerId,
         note: note.trim(),
-      });
+      }, token);
       setNote("");
       onApproved?.(result.run_id, accepted);
     } catch (err) {
@@ -161,6 +164,7 @@ export function EscalationPanel({
           onOpenChange={setOverrideOpen}
           result={result}
           reviewerId={reviewerId}
+          token={token}
           onSubmitted={(override, reasoning) => onOverridden?.(result.run_id, override, reasoning)}
         />
       </>
@@ -310,6 +314,7 @@ export function EscalationPanel({
         onOpenChange={setOverrideOpen}
         result={result}
         reviewerId={reviewerId}
+        token={token}
         onSubmitted={(override, reasoning) => onOverridden?.(result.run_id, override, reasoning)}
       />
     </div>
@@ -328,12 +333,14 @@ export function OverrideDialog({
   onOpenChange,
   result,
   reviewerId,
+  token,
   onSubmitted,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   result: ResolutionResult | null;
   reviewerId: string;
+  token?: string;
   onSubmitted: (override: OverrideAccepted, note: string) => void;
 }) {
   const [decision, setDecision] = useState<Decision>("partial_refund");
@@ -371,7 +378,7 @@ export function OverrideDialog({
         decision,
         amount: Number(amount) || 0,
         rationale: rationale.trim(),
-      });
+      }, token);
       onSubmitted(accepted, rationale.trim());
       onOpenChange(false);
     } catch (err) {

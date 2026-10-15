@@ -599,29 +599,44 @@ class OfflineReasoner:
                 anomalies=anomalies,
                 reasoning=reasoning,
             )
-        if any(k in caption for k in ("spill", "drink", "liquid", "bubble tea", "coffee")):
+        if any(k in caption for k in ("spill", "drink", "liquid", "bubble tea", "coffee", "sauce", "smeared", "grease", "soda")):
             severity = "liquid_spill"
-        elif any(k in caption for k in ("mess", "rubbish", "litter", "stain", "food")):
+        elif any(k in caption for k in ("mess", "rubbish", "litter", "stain", "food", "fries", "crumbs", "trash", "wrapper")):
             severity = "minor_mess"
         elif any(k in caption for k in ("damage", "torn", "broken", "vomit")):
             severity = "major_damage"
         else:
-            severity = "minor_mess"
+            # No caption keyword matched — the image content has not been
+            # analysed (offline mode inspects metadata, not pixels).  Label
+            # it "unknown" rather than guessing "minor_mess", which would
+            # overstate what the system actually knows.
+            severity = "unknown"
 
         genuine = exif_ok and ai_ok
         if not genuine:
             anomalies.append("Evidence marked inadmissible — excluded from the ruling")
 
         confidence = 0.9 if (exif_ok and ai_ok) else 0.86
-        reasoning = (
-            "EXIF timestamp is consistent with the trip window and the image passed the "
-            "synthetic-media screen; the cabin condition is admissible evidence."
-            if genuine
-            else "The photo fails forensic validation: "
-            + "; ".join(anomalies[:2])
-            + ". Under policy DAMAGE-2 the claim cannot rely on it, so the cleaning charge is "
-            "not supported by admissible evidence."
-        )
+        if severity == "unknown":
+            reasoning = (
+                "EXIF timestamp is consistent with the trip window and the image passed the "
+                "synthetic-media screen; however, the offline vision agent did not analyse the "
+                "actual image content (no caption keyword matched a known damage category). "
+                "The photo is admissible as evidence but its visual content is unclassified — "
+                "the system cannot assert what the photo depicts."
+            )
+        elif genuine:
+            reasoning = (
+                "EXIF timestamp is consistent with the trip window and the image passed the "
+                "synthetic-media screen; the cabin condition is admissible evidence."
+            )
+        else:
+            reasoning = (
+                "The photo fails forensic validation: "
+                + "; ".join(anomalies[:2])
+                + ". Under policy DAMAGE-2 the claim cannot rely on it, so the cleaning charge is "
+                "not supported by admissible evidence."
+            )
 
         return VisionFinding(
             attachment_id=attachment.attachment_id,
@@ -672,7 +687,8 @@ class OfflineReasoner:
         elif any(k in caption for k in ("damage", "torn", "broken", "vomit")):
             severity = "major_damage"
         else:
-            severity = "minor_mess"
+            # No caption keyword matched — the video content is unclassified.
+            severity = "unknown"
 
         genuine = frames > 0 and (delta is None or abs(delta) <= 45) and not (
             ai_prob is not None and ai_prob >= 0.50
@@ -795,7 +811,17 @@ class OfflineReasoner:
                 f"{' (' + fact.note + ')' if fact.note else ''}."
             )
         for check in checks_mine[:3]:
-            claim_parts.append(f"Policy {check.ref} is satisfied — {check.description}.")
+            if check.compliant:
+                claim_parts.append(
+                    f"Policy {check.ref} was evaluated and found compliant — {check.description} "
+                    f"(expected {check.expected}, observed {check.actual})."
+                )
+            else:
+                claim_parts.append(
+                    f"Policy {check.ref} applies to this dispute and the evidence shows a violation — "
+                    f"{check.description} (expected {check.expected}, observed {check.actual}). "
+                    f"Enforcement action has been taken as required."
+                )
         if not claim_parts[1:]:
             claim_parts.append(
                 "The verified evidence offers limited direct support for this party, so the case "
@@ -804,7 +830,11 @@ class OfflineReasoner:
 
         weaknesses = [
             f"{f.label}: {f.value}{' ' + f.unit if f.unit else ''}" for f in theirs[:2]
-        ] + [f"Policy {c.ref} cuts against this party ({c.description})." for c in checks_theirs[:1]]
+        ] + [
+            f"Policy {c.ref} was evaluated and the evidence shows a violation "
+            f"({c.description}: expected {c.expected}, observed {c.actual})."
+            for c in checks_theirs[:1] if not c.compliant
+        ]
         if not weaknesses:
             weaknesses = ["No material contradicting evidence was found in the packet."]
 
@@ -813,16 +843,36 @@ class OfflineReasoner:
         rejected = [v for v in vision if not v.genuine]
         if vision:
             if admissible and party == "driver":
-                vision_line = (
-                    f" The vision agent admitted the submitted photo at severity "
-                    f"'{admissible[0].severity}', which corroborates the cleaning claim."
-                )
+                att_id = admissible[0].attachment_id
+                if case.dispute_type.value == "property_damage":
+                    vision_line = (
+                        f" The vision agent admitted the submitted photo ({att_id}) at severity "
+                        f"'{admissible[0].severity}', which corroborates the cleaning claim."
+                    )
+                elif case.dispute_type.value == "safety_incident":
+                    vision_line = (
+                        f" The vision agent admitted the submitted media ({att_id}) at severity "
+                        f"'{admissible[0].severity}', which corroborates the driver's account."
+                    )
+                else:
+                    vision_line = (
+                        f" The vision agent admitted the submitted media ({att_id}) at severity "
+                        f"'{admissible[0].severity}', which supports this party's position."
+                    )
             elif rejected and party == "rider":
-                vision_line = (
-                    f" The vision agent rejected the photo as inadmissible "
-                    f"({rejected[0].anomalies[0] if rejected[0].anomalies else 'failed forensic checks'}), "
-                    "so the cleaning claim rests on no admissible evidence."
-                )
+                att_id = rejected[0].attachment_id
+                if case.dispute_type.value == "property_damage":
+                    vision_line = (
+                        f" The vision agent rejected the photo ({att_id}) as inadmissible "
+                        f"({rejected[0].anomalies[0] if rejected[0].anomalies else 'failed forensic checks'}), "
+                        "so the cleaning claim rests on no admissible evidence."
+                    )
+                else:
+                    vision_line = (
+                        f" The vision agent rejected the submitted media ({att_id}) as inadmissible "
+                        f"({rejected[0].anomalies[0] if rejected[0].anomalies else 'failed forensic checks'}), "
+                        "which weakens the opposing party's position."
+                    )
             elif rejected and party == "driver":
                 vision_line = (
                     " The photo submitted in support of the claim did not clear forensic "
@@ -870,7 +920,7 @@ class OfflineReasoner:
         if dtype == "no_show_charge":
             ruling = _judge_no_show(case, packet)
         elif dtype == "route_deviation":
-            ruling = _judge_route_deviation(case, packet)
+            ruling = _judge_route_deviation(case, packet, self.settings)
         elif dtype == "property_damage":
             ruling = _judge_property_damage(case, packet, vision)
         elif dtype == "safety_incident":
@@ -887,11 +937,13 @@ class OfflineReasoner:
                 "no_show_charge": "Rider was never served — charge should be reversed",
                 "route_deviation": "Unjustified detour inflated the fare",
                 "property_damage": "Cleaning claim is unsupported by valid evidence",
+                "safety_incident": "Safety incident demands accountability and human review",
             }.get(case.dispute_type.value, "Rider's position")
         return {
             "no_show_charge": "Driver fulfilled every policy obligation",
             "route_deviation": "Detour was a necessary, communicated response to traffic",
             "property_damage": "Documented mess warrants the cleaning fee",
+            "safety_incident": "Driver's conduct was within platform standards",
         }.get(case.dispute_type.value, "Driver's position")
 
     def _opening(self, case: DisputeCase, packet: EvidencePacket, party: str) -> str:
@@ -925,6 +977,34 @@ class OfflineReasoner:
                 f"Waive the S${fee_claim:.2f} cleaning fee entirely."
                 if party == "rider"
                 else f"Award the S${fee_claim:.2f} cleaning fee."
+            )
+        if case.dispute_type == "safety_incident":
+            # Safety disputes are outside the autonomy boundary, so the
+            # requested outcome focuses on the human-review process rather
+            # than a monetary ruling.
+            incident = (case.dispute_ticket.description or "").lower()
+            if any(k in incident for k in ("harass", "grop", "touch", "molest")):
+                return (
+                    "Refer to the Safety & Fraud team for investigation, with a "
+                    "recommendation for driver suspension pending review."
+                    if party == "rider"
+                    else "Refer to human review — the driver's fitness should not be "
+                    "prejudged before the investigator rules."
+                )
+            if any(k in incident for k in ("speed", "brak", "danger", "reckless")):
+                return (
+                    "Escalate to human review with a recommendation for a driver "
+                    "safety retraining referral and a formal warning."
+                    if party == "rider"
+                    else "Escalate to human review — the telematics do not corroborate "
+                    "dangerous driving and no autonomous finding should issue."
+                )
+            return (
+                "Escalate to human review with priority — the safety allegation "
+                "requires an investigator's judgement."
+                if party == "rider"
+                else "Escalate to human review — the driver is entitled to a fair "
+                "hearing before any account action."
             )
         return "Rule in favour of this party."
 
@@ -1043,7 +1123,9 @@ def _judge_no_show(case: DisputeCase, packet: EvidencePacket) -> Ruling:
     )
 
 
-def _judge_route_deviation(case: DisputeCase, packet: EvidencePacket) -> Ruling:
+def _judge_route_deviation(
+    case: DisputeCase, packet: EvidencePacket, settings: Optional[Any] = None
+) -> Ruling:
     deviation = _num(packet, "route_deviation_pct")
     overcharge = _num(packet, "fare_variance")
     stops = int(_num(packet, "unexplained_stops"))
@@ -1053,6 +1135,10 @@ def _judge_route_deviation(case: DisputeCase, packet: EvidencePacket) -> Ruling:
     ).value not in (None, "None provided")
     traffic = _fact(packet, "traffic_evidence") is not None
     est_duration = case.trip_data.estimated_duration_min or 0.0
+
+    # Configurable demo-policy ratios (not derived from measured congestion).
+    traffic_ratio = getattr(settings, "route_traffic_justified_ratio", 0.30) if settings else 0.30
+    unjustified_ratio = getattr(settings, "route_unjustified_ratio", 0.15) if settings else 0.15
 
     merit = 0.0
     if deviation > 30:
@@ -1066,7 +1152,7 @@ def _judge_route_deviation(case: DisputeCase, packet: EvidencePacket) -> Ruling:
     merit -= 0.10 if explained else 0.0
     merit -= 0.25 if traffic else 0.0
 
-    justified_ratio = 0.30 if traffic else 0.15
+    justified_ratio = traffic_ratio if traffic else unjustified_ratio
     refund = round(max(overcharge, 0.0) * (1 - justified_ratio), 2)
 
     findings = [
@@ -1098,9 +1184,10 @@ def _judge_route_deviation(case: DisputeCase, packet: EvidencePacket) -> Ruling:
         Decision.PARTIAL_REFUND: (
             f"The route exceeded the optimal distance by {deviation:g}% and the fare by "
             f"S${overcharge:.2f}, which the rider did not agree to. However, independent congestion "
-            f"data confirms traffic on the corridor, which legitimately accounts for roughly "
-            f"{int(justified_ratio * 100)}% of the excess. The remaining S${amount:.2f} is refunded "
-            "to the rider, and the balance of the fare stands."
+            f"data confirms traffic on the corridor. Under the demo refund policy, verified traffic "
+            f"is assumed to justify {int(justified_ratio * 100)}% of the excess (a fixed policy "
+            f"assumption, not a calculation from measured congestion severity). The remaining "
+            f"S${amount:.2f} is refunded to the rider, and the balance of the fare stands."
         ),
         Decision.UPHOLD_CHARGE: (
             f"The deviation of {deviation:g}% falls within operational tolerance and is explained by "

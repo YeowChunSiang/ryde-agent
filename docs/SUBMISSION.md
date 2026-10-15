@@ -36,10 +36,15 @@
 - **Technical architecture:** pure Python 3.11 + FastAPI + Pydantic v2 +
   httpx; React 19 + Vite + shadcn/ui console. Tencent Cloud TRTC for ASR
   (with a deterministic simulated client fallback) and `ffmpeg-python` for
-  keyframe extraction. Tennet Cloud ADP for inference (with a deterministic
+  keyframe extraction. Tencent Cloud ADP for inference (with a deterministic
   offline reasoner fallback so the demo works without credentials).
+  Reviewer Portal secured with Bearer-token auth on all approve/override
+  endpoints. Upload endpoints validate magic bytes and enforce a 50 MB
+  size cap. Precedent knowledge base uses atomic write-to-temp-then-rename
+  persistence so a crash never corrupts the KB.
 
 ![System architecture](./architecture_diagram.png)
+
 
 - **How prompts drive AI generation:** every agent system prompt pins
   its model call to a strict JSON output contract; the LLM is *only*

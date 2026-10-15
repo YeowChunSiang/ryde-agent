@@ -22,10 +22,12 @@ async function getJSON<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function postJSON<T>(path: string, body: unknown): Promise<T> {
+async function postJSON<T>(path: string, body: unknown, token?: string): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -68,8 +70,9 @@ export async function fetchResult(runId: string): Promise<ResolutionResult> {
 export async function submitOverride(
   runId: string,
   payload: OverrideRequest,
+  token?: string,
 ): Promise<OverrideAccepted> {
-  return postJSON<OverrideAccepted>(`/override/${runId}`, payload);
+  return postJSON<OverrideAccepted>(`/override/${runId}`, payload, token);
 }
 
 /**
@@ -99,8 +102,9 @@ export async function login(email: string, password: string): Promise<LoginAccep
 export async function submitApproval(
   runId: string,
   payload: ApproveRequest,
+  token?: string,
 ): Promise<ApprovalAccepted> {
-  return postJSON<ApprovalAccepted>(`/approve/${runId}`, payload);
+  return postJSON<ApprovalAccepted>(`/approve/${runId}`, payload, token);
 }
 
 export async function fetchPrecedents(): Promise<PrecedentLibrary> {

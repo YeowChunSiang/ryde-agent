@@ -5,6 +5,7 @@ import {
   ExternalLink,
   Gavel,
   Loader2,
+  Unlock,
 } from "lucide-react";
 
 import type {
@@ -56,15 +57,20 @@ export interface DisputeRow {
   review: ReviewerAction | null;
 }
 
+export type SortMode = "urgency" | "newest" | "oldest";
+
 interface Props {
   rows: DisputeRow[];
   mode?: "queue" | "history";
   empty?: string;
   /** Case ids with an in-flight approve/override call. */
   busy?: Record<string, boolean>;
+  /** Sort mode applied to the rows. Default: "urgency" (SLA priority + exposure). */
+  sortMode?: SortMode;
   onReview?: (row: DisputeRow) => void;
   onApprove?: (row: DisputeRow) => void;
   onOverride?: (row: DisputeRow) => void;
+  onReopen?: (row: DisputeRow) => void;
 }
 
 /**
@@ -84,12 +90,38 @@ export function DisputeTable({
   mode = "queue",
   empty = "Nothing to review.",
   busy = {},
+  sortMode = "urgency",
   onReview,
   onApprove,
   onOverride,
+  onReopen,
 }: Props) {
   const sorted = useMemo(() => {
-    return [...rows].sort((a, b) => {
+    const arr = [...rows];
+    // Reopened cases always go to the top of the queue, regardless of sort mode.
+    arr.sort((a, b) => {
+      const aReopened = a.status === "reopened" ? 0 : 1;
+      const bReopened = b.status === "reopened" ? 0 : 1;
+      if (aReopened !== bReopened) return aReopened - bReopened;
+
+      // For history mode, the "closed at" timestamp is the sort key.
+      if (mode === "history") {
+        const aTime = new Date(a.review?.at ?? a.filed_at).getTime();
+        const bTime = new Date(b.review?.at ?? b.filed_at).getTime();
+        if (sortMode === "oldest") return aTime - bTime;
+        // "newest", "recency", and "urgency" (fallback) all sort newest first
+        return bTime - aTime;
+      }
+
+      // Queue mode: non-urgency sorts use filed_at (creation time).
+      if (sortMode === "newest") {
+        return new Date(b.filed_at).getTime() - new Date(a.filed_at).getTime();
+      }
+      if (sortMode === "oldest") {
+        return new Date(a.filed_at).getTime() - new Date(b.filed_at).getTime();
+      }
+
+      // Default: "urgency" — SLA priority rank, then financial exposure.
       const priorityA = effectiveQueuePriority(a);
       const priorityB = effectiveQueuePriority(b);
       const rankA = priorityA ? QUEUE_PRIORITY_RANK[priorityA] : 9;
@@ -101,7 +133,8 @@ export function DisputeTable({
       }
       return a.case_id.localeCompare(b.case_id);
     });
-  }, [rows]);
+    return arr;
+  }, [rows, sortMode, mode]);
 
   if (!rows.length) {
     return (
@@ -124,12 +157,6 @@ export function DisputeTable({
           {mode === "queue" ? (
             <>
               <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Evidence
-              </TableHead>
-              <TableHead className="text-right text-[10px] uppercase tracking-wider text-muted-foreground">
-                Value
-              </TableHead>
-              <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">
                 Agent status
               </TableHead>
               <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -142,16 +169,13 @@ export function DisputeTable({
           ) : (
             <>
               <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Resolution status
-              </TableHead>
-              <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Reviewer action
-              </TableHead>
-              <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Original → final verdict
+                Resolution
               </TableHead>
               <TableHead className="text-right text-[10px] uppercase tracking-wider text-muted-foreground">
                 Closed at
+              </TableHead>
+              <TableHead className="text-right text-[10px] uppercase tracking-wider text-muted-foreground">
+                Action
               </TableHead>
             </>
           )}
@@ -190,10 +214,14 @@ export function DisputeTable({
                         aged +1 after {aging.workingDays} workdays
                       </p>
                     )}
-                    {row.sla_due_at && (
+                    {row.filed_at && (
                       <p className="mt-1 text-[10px] leading-none text-muted-foreground">
-                        due{" "}
-                        {new Date(row.sla_due_at).toLocaleTimeString("en-GB", {
+                        {new Date(row.filed_at).toLocaleDateString("en-GB", {
+                          day: "2-digit",
+                          month: "short",
+                          timeZone: "Asia/Singapore",
+                        })}{" "}
+                        {new Date(row.filed_at).toLocaleTimeString("en-GB", {
                           hour: "2-digit",
                           minute: "2-digit",
                           timeZone: "Asia/Singapore",
@@ -243,6 +271,15 @@ export function DisputeTable({
                     <span className="font-mono text-[10px] text-muted-foreground">
                       {row.dispute_id}
                     </span>
+                    {row.status === "reopened" && (
+                      <Badge
+                        variant="outline"
+                        className="h-4 gap-0.5 border-amber-500/40 bg-amber-500/10 px-1 text-[10px] font-semibold text-amber-300"
+                      >
+                        <Unlock className="h-2.5 w-2.5" />
+                        Re-opened
+                      </Badge>
+                    )}
                   </div>
                   <p className="mt-1 max-w-[22rem] whitespace-normal break-words text-xs font-medium leading-relaxed">
                     {row.title}
@@ -257,45 +294,43 @@ export function DisputeTable({
                     <span className="text-[10px] text-muted-foreground">
                       filed by {row.filed_by}
                     </span>
+                    {row.evidence_kind && (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "h-4 px-1 text-[10px]",
+                          MEDIA_KIND_META[row.evidence_kind]?.className,
+                        )}
+                      >
+                        {MEDIA_KIND_META[row.evidence_kind]?.label ?? row.evidence_kind}
+                      </Badge>
+                    )}
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      S${row.financial_value.toFixed(2)}
+                    </span>
+                    {row.financial_note && (
+                      <span
+                        className="text-[10px] text-muted-foreground"
+                        title={row.financial_note}
+                      >
+                        · {row.financial_note}
+                      </span>
+                    )}
                   </div>
+                  {row.status === "reopened" && row.decision && (
+                    <p className="mt-1 text-[10px] leading-relaxed text-amber-300/70">
+                      Previous conclusion: {decisionLabel(row.decision)}
+                      {row.amount > 0 && (
+                        <span className="font-mono"> · S${row.amount.toFixed(2)}</span>
+                      )}
+                    </p>
+                  )}
                 </>
               )}
             </TableCell>
 
             {mode === "queue" ? (
               <>
-                {/* ---- evidence ------------------------------------------ */}
-                <TableCell className="py-3">
-                  {row.evidence_kind ? (
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "h-5 px-1.5 text-[10px]",
-                        MEDIA_KIND_META[row.evidence_kind]?.className,
-                      )}
-                    >
-                      {MEDIA_KIND_META[row.evidence_kind]?.label ?? row.evidence_kind}
-                    </Badge>
-                  ) : (
-                    <span className="text-[10px] text-muted-foreground">text only</span>
-                  )}
-                </TableCell>
-
-                {/* ---- value --------------------------------------------- */}
-                <TableCell className="py-3 text-right">
-                  <span className="font-mono text-xs">
-                    S${row.financial_value.toFixed(2)}
-                  </span>
-                  {row.financial_note && (
-                    <p
-                      className="mt-1 max-w-[9rem] whitespace-normal break-words text-[10px] leading-none text-muted-foreground"
-                      title={row.financial_note}
-                    >
-                      {row.financial_note}
-                    </p>
-                  )}
-                </TableCell>
-
                 {/* ---- agent status -------------------------------------- */}
                 <TableCell className="py-3">
                   <RunStatusPill status={row.status} confidence={row.confidence} />
@@ -366,44 +401,40 @@ export function DisputeTable({
               </>
             ) : (
               <>
-                {/* ---- resolution status --------------------------------- */}
+                {/* ---- resolution (merged status + reviewer action + verdict) - */}
                 <TableCell className="py-3">
                   {row.review?.kind === "overridden" ? (
                     <Badge
                       variant="outline"
-                      className="h-5 border-lime-500/40 bg-lime-500/10 px-1.5 text-[10px] text-lime-300"
+                      className="h-5 border-lime-500/40 bg-lime-500/10 px-1.5 text-[10px] font-semibold tracking-wide text-lime-300"
                     >
-                      overridden
+                      OVERRIDDEN
                     </Badge>
                   ) : row.review ? (
                     <Badge
                       variant="outline"
-                      className="h-5 border-emerald-500/40 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-300"
+                      className="h-5 border-emerald-500/40 bg-emerald-500/10 px-1.5 text-[10px] font-semibold tracking-wide text-emerald-300"
                     >
-                      approved
+                      APPROVED
                     </Badge>
                   ) : (
                     <Badge
                       variant="outline"
-                      className="h-5 border-zinc-500/40 bg-zinc-500/10 px-1.5 text-[10px] text-zinc-300"
+                      className="h-5 border-zinc-500/40 bg-zinc-500/10 px-1.5 text-[10px] font-semibold tracking-wide text-zinc-300"
                     >
-                      archived
+                      ARCHIVED
                     </Badge>
                   )}
                   {row.escalated && (
                     <Badge
                       variant="outline"
-                      className="mt-1 h-5 border-red-500/50 bg-red-500/15 px-1.5 text-[10px] text-red-300"
+                      className="mt-1 h-5 border-red-500/50 bg-red-500/15 px-1.5 text-[10px] font-semibold tracking-wide text-red-300"
                     >
-                      was escalated
+                      WAS ESCALATED
                     </Badge>
                   )}
-                </TableCell>
-
-                {/* ---- reviewer action ----------------------------------- */}
-                <TableCell className="py-3">
-                  {row.review ? (
-                    <>
+                  {row.review && (
+                    <div className="mt-1.5">
                       <div className="flex items-center gap-1.5">
                         {row.review.kind === "overridden" ? (
                           <Gavel className="h-3 w-3 text-lime-300" />
@@ -413,41 +444,35 @@ export function DisputeTable({
                         <span className="text-xs font-medium">
                           {row.review.kind === "overridden" ? "Override" : "Approved"}
                         </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {row.review.reviewer_name || row.review.reviewer_id || "—"}
+                        </span>
                       </div>
-                      <p className="mt-1 text-[10px] leading-none text-muted-foreground">
-                        {row.review.reviewer_name || row.review.reviewer_id || "—"}
-                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <span className="text-muted-foreground line-through">
+                          {decisionLabel(row.review.original_decision)}
+                        </span>
+                        <span className="text-muted-foreground">→</span>
+                        <span className="font-semibold">
+                          {decisionLabel(row.review.final_decision ?? row.decision)}
+                        </span>
+                        {(row.review.final_amount ?? row.amount) > 0 && (
+                          <span className="font-mono text-[10px]">
+                            S${(row.review.final_amount ?? row.amount).toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                      {row.review.kind === "overridden" && (
+                        <p className="mt-1 text-[10px] leading-none text-lime-300/80">
+                          precedent written · KB {row.review.knowledge_base_size}
+                        </p>
+                      )}
                       {row.review.note && (
                         <p className="mt-1 max-w-[18rem] whitespace-normal break-words text-[10px] leading-snug text-muted-foreground">
                           {row.review.note}
                         </p>
                       )}
-                    </>
-                  ) : (
-                    <span className="text-[10px] text-muted-foreground">—</span>
-                  )}
-                </TableCell>
-
-                {/* ---- original → final ---------------------------------- */}
-                <TableCell className="py-3">
-                  <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                    <span className="text-muted-foreground line-through">
-                      {decisionLabel(row.review?.original_decision)}
-                    </span>
-                    <span className="text-muted-foreground">→</span>
-                    <span className="font-semibold">
-                      {decisionLabel(row.review?.final_decision ?? row.decision)}
-                    </span>
-                    {(row.review?.final_amount ?? row.amount) > 0 && (
-                      <span className="font-mono text-[10px]">
-                        S${(row.review?.final_amount ?? row.amount).toFixed(2)}
-                      </span>
-                    )}
-                  </div>
-                  {row.review?.kind === "overridden" && (
-                    <p className="mt-1 text-[10px] leading-none text-lime-300/80">
-                      precedent written · KB {row.review.knowledge_base_size}
-                    </p>
+                    </div>
                   )}
                 </TableCell>
 
@@ -473,6 +498,20 @@ export function DisputeTable({
                   ) : (
                     <span className="text-[10px] text-muted-foreground">—</span>
                   )}
+                </TableCell>
+
+                {/* ---- reopen action ------------------------------------- */}
+                <TableCell className="py-3 text-right">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-[11px] text-amber-300"
+                    onClick={() => onReopen?.(row)}
+                    disabled={!row.review}
+                  >
+                    <Unlock className="h-3 w-3" />
+                    Reopen
+                  </Button>
                 </TableCell>
               </>
             )}
@@ -508,7 +547,7 @@ function workingDaysSince(iso: string): number {
 }
 
 function agingInfo(row: DisputeRow): { workingDays: number; bumped: boolean } {
-  if (row.review) return { workingDays: 0, bumped: false };
+  if (row.review || row.status === "reopened") return { workingDays: 0, bumped: false };
   if (!row.sla_priority || !row.filed_at) return { workingDays: 0, bumped: false };
   const workingDays = workingDaysSince(row.filed_at);
   if (workingDays < 3) return { workingDays, bumped: false };
@@ -538,7 +577,7 @@ function RunStatusPill({
     return (
       <span className="inline-flex items-center gap-1.5 text-[11px] text-cyan-300">
         <Loader2 className="h-3 w-3 animate-spin" />
-        arbitrating…
+        Arbitrating…
       </span>
     );
   }
@@ -546,7 +585,7 @@ function RunStatusPill({
     return (
       <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <span className="h-1.5 w-1.5 rounded-full bg-zinc-500" />
-        queued
+        Queued
       </span>
     );
   }
@@ -554,7 +593,7 @@ function RunStatusPill({
     return (
       <span className="inline-flex items-center gap-1.5 text-[11px] text-orange-300">
         <span className="h-1.5 w-1.5 rounded-full bg-orange-400" />
-        escalated
+        Escalated
       </span>
     );
   }
@@ -562,7 +601,7 @@ function RunStatusPill({
     return (
       <span className="inline-flex items-center gap-1.5 text-[11px] text-sky-300">
         <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-        awaiting human review
+        Awaiting Human Review
         {confidence !== null && (
           <span className="font-mono text-[10px] text-muted-foreground">
             {(confidence * 100).toFixed(0)}%
@@ -575,12 +614,20 @@ function RunStatusPill({
     return (
       <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-300">
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-        archived
+        Archived
+      </span>
+    );
+  }
+  if (status === "reopened") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11px] text-amber-300">
+        <Unlock className="h-3 w-3" />
+        Re-opened
       </span>
     );
   }
   if (status === "failed") {
-    return <span className="text-[11px] text-red-300">run failed</span>;
+    return <span className="text-[11px] text-red-300">Run Failed</span>;
   }
-  return <span className="text-[11px] text-muted-foreground">not run</span>;
+  return <span className="text-[11px] text-muted-foreground">Not Run</span>;
 }

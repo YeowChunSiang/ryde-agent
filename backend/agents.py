@@ -24,11 +24,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import time
 import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger("ryderesolve.precedents")
 
 from config import Settings
 from models import (
@@ -713,16 +717,31 @@ class PrecedentStore:
         self.cases = _seed_precedents()
         self._persist()
 
-    def _persist(self) -> None:
+    def _persist(self) -> bool:
+        """Atomically write the knowledge base to disk.
+
+        Returns ``True`` only when the file has been confirmed on disk.  Uses
+        a write-to-temp-then-rename pattern so a crash mid-write never leaves
+        a half-written JSON file behind.  Failures are logged rather than
+        swallowed silently, so the caller can distinguish in-memory success
+        from durable storage.
+        """
         if self.path is None:
-            return
+            return False
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(
-                json.dumps([c.model_dump(mode="json") for c in self.cases], indent=2)
+            data = json.dumps(
+                [c.model_dump(mode="json") for c in self.cases], indent=2
             )
-        except Exception:  # read-only FS must never break arbitration
-            pass
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(data, encoding="utf-8")
+            os.replace(tmp, self.path)
+            return True
+        except Exception as exc:
+            logger.error(
+                "Failed to persist precedent store to %s: %s", self.path, exc
+            )
+            return False
 
     @property
     def size(self) -> int:
@@ -739,7 +758,13 @@ class PrecedentStore:
     def add(self, case: PrecedentCase) -> PrecedentCase:
         _ = self.size
         self.cases.append(case)
-        self._persist()
+        persisted = self._persist()
+        if not persisted and self.path is not None:
+            logger.warning(
+                "Precedent %s added in-memory but NOT persisted to disk — "
+                "the knowledge base may be inconsistent on restart.",
+                case.precedent_id,
+            )
         return case
 
     def reset(self) -> None:

@@ -4,6 +4,7 @@ import {
   AlertCircle,
   AlertTriangle,
   BookMarked,
+  ChevronDown,
   Cpu,
   Gavel,
   Loader2,
@@ -30,12 +31,22 @@ import {
   subscribeToRun,
 } from "@/lib/api";
 import { useCaseStore } from "@/components/CasePersistenceContext";
-import { DisputeTable, type DisputeRow } from "@/components/DisputeTable";
+import { DisputeTable, type DisputeRow, type SortMode } from "@/components/DisputeTable";
 import { OverrideDialog } from "@/components/EscalationPanel";
 import { ReviewerNav } from "@/components/ReviewerNav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 /** How many arbitrations the background intake queue runs at once. */
@@ -63,6 +74,7 @@ export default function Dashboard() {
     clearRun,
     recordApproval,
     recordOverride,
+    reopenCase,
     seedBaseline,
   } = useCaseStore();
 
@@ -74,6 +86,9 @@ export default function Dashboard() {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [overrideRow, setOverrideRow] = useState<DisputeRow | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [queueSort, setQueueSort] = useState<SortMode>("urgency");
+  const [historySort, setHistorySort] = useState<SortMode>("newest");
+  const [historyFilter, setHistoryFilter] = useState<string>("all");
 
   const recordsRef = useRef(records);
   useEffect(() => {
@@ -225,10 +240,13 @@ export default function Dashboard() {
         const approval: ApprovalAccepted = await submitApproval(row.run_id, {
           reviewer_id: reviewerId,
           note: "Verified against the escalation packet and supporting evidence.",
-        });
+        }, session?.token);
         const original = recordsRef.current[row.case_id]?.result ?? null;
         recordApproval(row.case_id, approval, original, reviewerName);
         await refreshKb();
+        toast.success(`Case ${row.case_id} approved successfully`, {
+          description: "It has been moved to the Archive tab.",
+        });
         setTab("history");
       } catch (err) {
         setError(String(err));
@@ -236,7 +254,7 @@ export default function Dashboard() {
         setBusy((prev) => ({ ...prev, [row.case_id]: false }));
       }
     },
-    [recordApproval, refreshKb, reviewerId, reviewerName],
+    [recordApproval, refreshKb, reviewerId, reviewerName, session],
   );
 
   const onOverrideSubmit = useCallback(
@@ -247,9 +265,23 @@ export default function Dashboard() {
       recordOverride(row.case_id, override, original, reviewerId, reviewerName, note);
       setOverrideRow(null);
       await refreshKb();
+      toast.success(`Case ${row.case_id} override submitted successfully`, {
+        description: "It has been moved to the Archive tab with the new verdict.",
+      });
       setTab("history");
     },
     [overrideRow, recordOverride, refreshKb, reviewerId, reviewerName],
+  );
+
+  const onReopen = useCallback(
+    (row: DisputeRow) => {
+      reopenCase(row.case_id);
+      toast.success(`Case ${row.case_id} has been re-opened`, {
+        description: "Moved to the top of the New queue for further review.",
+      });
+      setTab("queue");
+    },
+    [reopenCase],
   );
 
   const reRunQueue = useCallback(async () => {
@@ -295,15 +327,44 @@ export default function Dashboard() {
     [cases, records],
   );
 
+  // Active rows: all incoming cases without a review, PLUS any case that was
+  // manually reopened (status === "reopened") — regardless of original intake.
   const activeRows = rows.filter((r) => {
+    if (r.status === "reopened") return true;
     const c = cases.find((x) => x.case_id === r.case_id);
     return c?.intake === "incoming" && !r.review;
   });
   const escalatedRows = activeRows.filter((r) => r.escalated || r.status === "escalated");
-  const standardRows = activeRows.filter((r) => !r.escalated && r.status !== "escalated");
+  // Reopened cases go to the top of the standard queue so they're acted on first.
+  const standardRows = activeRows
+    .filter((r) => !r.escalated && r.status !== "escalated")
+    .sort((a, b) => {
+      const aReopened = a.status === "reopened" ? 0 : 1;
+      const bReopened = b.status === "reopened" ? 0 : 1;
+      if (aReopened !== bReopened) return aReopened - bReopened;
+      return 0; // preserve existing sort within groups
+    });
   const historyRows = rows.filter(
-    (r) => r.review !== null || cases.find((x) => x.case_id === r.case_id)?.intake === "historical",
+    (r) =>
+      r.review !== null ||
+      (cases.find((x) => x.case_id === r.case_id)?.intake === "historical" &&
+        r.status !== "reopened"),
   );
+
+  // Collect unique reviewer names for the archive filter dropdown.
+  const reviewerNames = useMemo(() => {
+    const names = new Set<string>();
+    historyRows.forEach((r) => {
+      if (r.review?.reviewer_name) names.add(r.review.reviewer_name);
+    });
+    return Array.from(names).sort();
+  }, [historyRows]);
+
+  // Apply reviewer filter to history rows (sorting is handled by DisputeTable).
+  const filteredHistoryRows = useMemo(() => {
+    if (historyFilter === "all") return historyRows;
+    return historyRows.filter((r) => r.review?.reviewer_name === historyFilter);
+  }, [historyRows, historyFilter]);
 
   const running = rows.filter((r) => r.status === "processing").length;
   const pending = rows.filter((r) => r.status === "pending").length;
@@ -332,54 +393,62 @@ export default function Dashboard() {
         </Link>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Badge
-            variant="outline"
-            className="h-6 gap-1.5 font-mono text-[10px]"
-            title={
-              health?.engine === "adp"
-                ? "LLM reasoner: live Tencent Cloud ADP — set ADP_APP_KEY in backend/.env to enable."
-                : "LLM reasoner: deterministic offline engine. Same ruling every run, no credential needed. Set ADP_APP_KEY to switch to live."
-            }
-          >
-            <Server className="h-3 w-3" />
-            {health ? `reasoner: ${health.engine}` : "reasoner: connecting…"}
-          </Badge>
-          {health && !health.adp_configured && (
-            <Badge
-              variant="outline"
-              className="h-6 border-amber-500/30 bg-amber-500/10 font-mono text-[10px] text-amber-300"
-              title="Tencent Cloud ADP credentials are not set. The platform uses the deterministic offline reasoner so the demo always works."
-            >
-              ADP: offline (offline reasoner)
-            </Badge>
-          )}
-          {kbSize !== null && (
-            <Badge
-              variant="outline"
-              className="h-6 gap-1.5 border-lime-500/30 bg-lime-500/10 font-mono text-[10px] text-lime-300"
-              title="Policy & Precedent knowledge base — grows every time a reviewer approves or overrides a ticket."
-            >
-              <BookMarked className="h-3 w-3" />
-              KB: {kbSize} precedents
-            </Badge>
-          )}
-          {health?.video_backend && (
-            <Badge
-              variant="outline"
-              className={
-                health.video_backend === "unavailable"
-                  ? "h-6 border-red-500/30 bg-red-500/10 font-mono text-[10px] text-red-300"
-                  : "h-6 border-violet-500/30 bg-violet-500/10 font-mono text-[10px] text-violet-300"
-              }
-              title={
-                health.video_backend === "unavailable"
-                  ? "No video backend is installed on this host — install ffmpeg or opencv-python to enable keyframe extraction."
-                  : `Keyframes are extracted with ${health.video_backend} at 1 fps.`
-              }
-            >
-              keyframes: {health.video_backend}
-            </Badge>
-          )}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
+                <Server className="h-3.5 w-3.5" />
+                System
+                {health && !health.adp_configured && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80 p-3">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                System Status
+              </p>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Server className="h-3 w-3 shrink-0" />
+                  <span className="text-xs">
+                    {health ? `reasoner: ${health.engine}` : "reasoner: connecting…"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      health?.adp_configured ? "bg-emerald-400" : "bg-amber-400",
+                    )}
+                  />
+                  <span className="text-xs">
+                    {health ? `ADP: ${health.adp_configured ? "connected" : "offline (offline reasoner)"}` : "ADP: —"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <BookMarked className="h-3 w-3 shrink-0" />
+                  <span className="text-xs">
+                    KB: {kbSize ?? "—"} precedents
+                  </span>
+                </div>
+                {health?.video_backend && (
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        health.video_backend === "unavailable"
+                          ? "bg-red-400"
+                          : "bg-violet-400",
+                      )}
+                    />
+                    <span className="text-xs">
+                      keyframes: {health.video_backend}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
           <Button
             variant="outline"
             size="sm"
@@ -465,6 +534,11 @@ export default function Dashboard() {
           </TabsList>
 
           <TabsContent value="queue" className="mt-4 space-y-5">
+            <SortFilterBar
+              sort={queueSort}
+              onSortChange={setQueueSort}
+              showReviewerFilter={false}
+            />
             <section>
               <SectionHeader
                 title="Action Required: Escalated Cases"
@@ -475,6 +549,7 @@ export default function Dashboard() {
               <DisputeTable
                 rows={escalatedRows}
                 busy={busy}
+                sortMode={queueSort}
                 onReview={onReview}
                 onApprove={onApprove}
                 onOverride={setOverrideRow}
@@ -486,27 +561,41 @@ export default function Dashboard() {
               />
             </section>
 
-            <section>
-              <SectionHeader
-                title="Standard Agent Determinations (Awaiting Review)"
-                hint="Agent-determined tickets awaiting human review, ordered by SLA urgency then financial exposure."
-                tone="zinc"
-                icon={<ShieldCheck className="h-3.5 w-3.5" />}
-              />
-              <DisputeTable
-                rows={standardRows}
-                busy={busy}
-                onReview={onReview}
-                onApprove={onApprove}
-                onOverride={setOverrideRow}
-                empty={
-                  loading ? "Loading dispute queue…" : "Every standard determination is closed."
-                }
-              />
-            </section>
+            <Collapsible defaultOpen>
+              <CollapsibleTrigger className="mb-2 w-full text-left">
+                <SectionHeader
+                  title="Standard Agent Determinations (Awaiting Review)"
+                  hint="Agent-determined tickets awaiting human review, ordered by SLA urgency then financial exposure."
+                  tone="zinc"
+                  icon={<ShieldCheck className="h-3.5 w-3.5" />}
+                  chevron
+                />
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <DisputeTable
+                  rows={standardRows}
+                  busy={busy}
+                  sortMode={queueSort}
+                  onReview={onReview}
+                  onApprove={onApprove}
+                  onOverride={setOverrideRow}
+                  empty={
+                    loading ? "Loading dispute queue…" : "Every standard determination is closed."
+                  }
+                />
+              </CollapsibleContent>
+            </Collapsible>
           </TabsContent>
 
           <TabsContent value="history" className="mt-4">
+            <SortFilterBar
+              sort={historySort}
+              onSortChange={setHistorySort}
+              showReviewerFilter
+              reviewerFilter={historyFilter}
+              onReviewerFilterChange={setHistoryFilter}
+              reviewerNames={reviewerNames}
+            />
             <SectionHeader
               title="Archived — closed tickets & audit trail"
               hint="Resolution status, reviewer action, original vs final verdict and timestamp."
@@ -514,10 +603,12 @@ export default function Dashboard() {
               icon={<BookMarked className="h-3.5 w-3.5" />}
             />
             <DisputeTable
-              rows={historyRows}
+              rows={filteredHistoryRows}
               mode="history"
               busy={busy}
+              sortMode={historySort}
               onReview={onReview}
+              onReopen={onReopen}
               empty="Approve or override a ticket and it lands here with its full audit trail."
             />
           </TabsContent>
@@ -529,8 +620,66 @@ export default function Dashboard() {
         onOpenChange={(open) => !open && setOverrideRow(null)}
         result={overrideResult}
         reviewerId={reviewerId}
+        token={session?.token}
         onSubmitted={onOverrideSubmit}
       />
+    </div>
+  );
+}
+
+function SortFilterBar({
+  sort,
+  onSortChange,
+  showReviewerFilter,
+  reviewerFilter,
+  onReviewerFilterChange,
+  reviewerNames,
+}: {
+  sort: SortMode;
+  onSortChange: (v: SortMode) => void;
+  showReviewerFilter: boolean;
+  reviewerFilter?: string;
+  onReviewerFilterChange?: (v: string) => void;
+  reviewerNames?: string[];
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Sort
+      </span>
+      <Select value={sort} onValueChange={(v) => onSortChange(v as SortMode)}>
+        <SelectTrigger size="sm" className="h-7 w-[11rem] text-[11px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="urgency" className="text-[11px]">SLA urgency (default)</SelectItem>
+          <SelectItem value="newest" className="text-[11px]">Newest first</SelectItem>
+          <SelectItem value="oldest" className="text-[11px]">Oldest first</SelectItem>
+        </SelectContent>
+      </Select>
+      {showReviewerFilter && (
+        <>
+          <span className="ml-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Reviewer
+          </span>
+          <Select
+            value={reviewerFilter ?? "all"}
+            onValueChange={(v) => onReviewerFilterChange?.(v)}
+          >
+            <SelectTrigger size="sm" className="h-7 w-[12rem] text-[11px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-[11px]">All reviewers</SelectItem>
+              {reviewerNames?.map((name) => (
+                <SelectItem key={name} value={name} className="text-[11px]">
+                  {name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </>
+      )}
     </div>
   );
 }
@@ -554,12 +703,12 @@ function StatCard({
   }[tone];
 
   return (
-    <div className={cn("rounded-lg border px-3 py-2.5", toneClass)}>
-      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider opacity-80">
-        {icon}
-        {label}
-      </p>
-      <p className="mt-1 text-xl font-bold leading-none">{value}</p>
+    <div className={cn("flex items-center gap-3 rounded-lg border px-3 py-2", toneClass)}>
+      {icon && <span className="shrink-0 opacity-80">{icon}</span>}
+      <div>
+        <p className="text-[10px] uppercase tracking-wider opacity-80">{label}</p>
+        <p className="text-lg font-bold leading-none">{value}</p>
+      </div>
     </div>
   );
 }
@@ -569,11 +718,13 @@ function SectionHeader({
   hint,
   tone,
   icon,
+  chevron = false,
 }: {
   title: string;
   hint: string;
   tone: "red" | "zinc" | "emerald";
   icon?: React.ReactNode;
+  chevron?: boolean;
 }) {
   const toneClass = {
     red: "text-red-300",
@@ -586,6 +737,9 @@ function SectionHeader({
       <h2 className={cn("flex items-center gap-1.5 text-sm font-semibold tracking-tight", toneClass)}>
         {icon}
         {title}
+        {chevron && (
+          <ChevronDown className="ml-auto h-3.5 w-3.5 text-muted-foreground transition-transform [[data-state=closed]_&]:rotate-180" />
+        )}
       </h2>
       <p className="mt-0.5 whitespace-normal break-words text-[11px] leading-relaxed text-muted-foreground">
         {hint}

@@ -84,6 +84,8 @@ interface StoreApi {
     note: string,
   ) => void;
   seedBaseline: (caseId: string, review: ReviewerAction) => void;
+  /** Re-open a closed ticket — clears the review but preserves the arbitration history. */
+  reopenCase: (caseId: string) => void;
   signIn: (email: string, password: string) => Promise<LoginAccepted>;
   signOut: () => void;
   authPending: boolean;
@@ -150,7 +152,9 @@ function loadStore(): CaseStore {
       status:
         record.status === "processing" || record.status === "pending"
           ? "idle"
-          : record.status ?? "idle",
+          : record.status === "resolved" && !normalizedReview
+            ? "reopened"
+            : record.status ?? "idle",
       events: Array.isArray(record.events) ? record.events : [],
       result: record.result ?? null,
       review: normalizedReview,
@@ -390,11 +394,32 @@ export function CasePersistenceProvider({ children }: { children: ReactNode }) {
   const seedBaseline = useCallback(
     (caseId: string, review: ReviewerAction) => {
       const existing = recordsRef.current[caseId];
-      if (existing?.review) return;
+      // Don't overwrite a case that was already reviewed or manually reopened.
+      if (existing?.review || existing?.status === "reopened") return;
       patch(caseId, { status: "resolved", review });
     },
     [patch],
   );
+
+  const reopenCase = useCallback((caseId: string) => {
+    setRecords((prev) => {
+      const existing = prev[caseId];
+      if (!existing?.review) return prev;
+      const nextResult = existing.result
+        ? { ...existing.result, approval: null, override: null }
+        : null;
+      return {
+        ...prev,
+        [caseId]: {
+          ...existing,
+          review: null,
+          status: "reopened",
+          result: nextResult,
+          updated_at: stamp(),
+        },
+      };
+    });
+  }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
     setAuthPending(true);
@@ -428,6 +453,7 @@ export function CasePersistenceProvider({ children }: { children: ReactNode }) {
       recordApproval,
       recordOverride,
       seedBaseline,
+      reopenCase,
       signIn,
       signOut,
       authPending,
@@ -447,6 +473,7 @@ export function CasePersistenceProvider({ children }: { children: ReactNode }) {
       recordApproval,
       recordOverride,
       seedBaseline,
+      reopenCase,
       signIn,
       signOut,
       authPending,

@@ -337,6 +337,7 @@ class VideoAnalysis(_Strict):
         "liquid_spill",
         "major_damage",
         "conduct_violation",
+        "unknown",
     ] = "none"
     reasoning: str = ""
     engine: Literal["ffmpeg", "opencv", "unavailable"] = "ffmpeg"
@@ -684,6 +685,7 @@ class VisionFinding(_Strict):
         "liquid_spill",
         "major_damage",
         "conduct_violation",
+        "unknown",
     ] = "none"
     anomalies: list[str] = Field(default_factory=list)
     reasoning: str = ""
