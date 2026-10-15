@@ -1,7 +1,5 @@
 # Hackathon submission sheet — RydeResolve
 
-Fill the entries below into the submission form.
-
 ## Project title
 **RydeResolve**
 
@@ -41,7 +39,8 @@ Fill the entries below into the submission form.
   keyframe extraction. Tennet Cloud ADP for inference (with a deterministic
   offline reasoner fallback so the demo works without credentials).
 
-![System architecture](architecture.png)
+![System architecture](./architecture_diagram.png)
+
 - **How prompts drive AI generation:** every agent system prompt pins
   its model call to a strict JSON output contract; the LLM is *only*
   allowed to argue over facts that Python already computed, never to
@@ -71,10 +70,12 @@ Fill the entries below into the submission form.
   Our `LLMProvider` protocol is the seam.
 
 ## Cover image
-`docs/cover.png` (380×216)
+![Cover Page](./cover.png)
 
 ## CodeBuddy / WorkBuddy conversation history
-This conversation log is the proof.
+![Screenshot 1](./screenshot_1.png)
+![Screenshot 2](./screenshot_2.png)
+![Screenshot 3](./screenshot_3.png)
 
 ## Demo flow (link in `/docs/screenshots/`)
 1. `01_disp003_verdict.png` — property damage with a fabricated photo,
