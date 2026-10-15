@@ -306,6 +306,20 @@ def test_upload_rejects_a_mismatched_payload(client, sample_video):
     assert res.status_code == 415
 
 
+def test_upload_rejects_an_oversized_payload(client, monkeypatch):
+    """An upload exceeding the size limit must return 413."""
+    import io
+
+    monkeypatch.setattr(main_mod.settings, "max_upload_size_mb", 1.0)
+    oversized = b"\x00" * (2 * 1024 * 1024)
+    res = client.post(
+        "/upload-audio",
+        files={"file": ("big.wav", io.BytesIO(oversized), "audio/wav")},
+        data={"case_id": "DISP-006"},
+    )
+    assert res.status_code == 413
+
+
 def test_uploaded_media_is_served_over_http(client, sample_video):
     with sample_video.open("rb") as fh:
         body = client.post(

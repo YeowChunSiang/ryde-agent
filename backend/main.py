@@ -131,6 +131,21 @@ def _verify_reviewer(
     return reviewer_id
 
 
+def _optional_verify_reviewer(
+    authorization: Optional[str] = Header(default=None),
+) -> str:
+    """Dependency: enforce auth only when ``settings.require_auth`` is enabled.
+
+    When ``require_auth`` is False (the default, for local demos), this passes
+    through and returns ``"anonymous"`` so every endpoint stays open.  When True
+    (set ``REQUIRE_AUTH=true`` for public deployment), it delegates to
+    ``_verify_reviewer`` and demands a valid Bearer token.
+    """
+    if not settings.require_auth:
+        return "anonymous"
+    return _verify_reviewer(authorization)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if settings.adp_configured and orchestrator.engine == "adp":
@@ -235,6 +250,32 @@ def _stream(run) -> StreamingResponse:
     )
 
 
+async def _read_bounded(
+    file: UploadFile, max_bytes: int, chunk_size: int = 65536
+) -> bytes:
+    """Read an UploadFile in chunks, rejecting uploads that exceed *max_bytes*.
+
+    Reads in 64 KB chunks and accumulates into a bytearray.  If the running
+    total exceeds *max_bytes*, raises ``HTTPException(413)`` immediately —
+    before the entire file is loaded into memory.
+    """
+    buf = bytearray()
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Upload size exceeds the "
+                    f"{max_bytes / 1024 / 1024:.0f} MB limit."
+                ),
+            )
+    return bytes(buf)
+
+
 # ---------------------------------------------------------------------------
 # Core routes
 # ---------------------------------------------------------------------------
@@ -260,12 +301,14 @@ async def health() -> dict:
 
 
 @app.get("/cases")
-async def cases() -> dict:
+async def cases(_: str = Depends(_optional_verify_reviewer)) -> dict:
     return {"cases": [c.model_dump(mode="json") for c in list_cases()]}
 
 
 @app.get("/cases/{case_id}")
-async def case_detail(case_id: str) -> dict:
+async def case_detail(
+    case_id: str, _: str = Depends(_optional_verify_reviewer)
+) -> dict:
     if case_id not in CASE_REGISTRY:
         raise HTTPException(status_code=404, detail=f"Unknown case '{case_id}'")
     return CASE_REGISTRY[case_id]
@@ -284,6 +327,7 @@ async def upload_audio(
     captured_at: Optional[str] = Form(default=None),
     caption: Optional[str] = Form(default=None),
     transcript_hint: Optional[str] = Form(default=None),
+    _: str = Depends(_optional_verify_reviewer),
 ) -> dict:
     """Ingest an audio recording and transcribe it with TRTC ASR.
 
@@ -294,13 +338,9 @@ async def upload_audio(
     Without TRTC credentials the deterministic simulated ASR runs instead, so
     the endpoint is always demoable (and testable in CI).
     """
-    raw = await file.read()
+    raw = await _read_bounded(file, int(settings.max_upload_size_mb * 1024 * 1024))
     if not raw:
         raise HTTPException(status_code=400, detail="Empty audio payload")
-    try:
-        media_store.validate_size(raw)
-    except ValueError as exc:
-        raise HTTPException(status_code=413, detail=str(exc)) from exc
     kind = media_type_for(file.filename or "clip.wav")
     if kind != "audio":
         raise HTTPException(
@@ -373,6 +413,7 @@ async def upload_image(
     uploaded_by: str = Form(default="rider"),
     captured_at: Optional[str] = Form(default=None),
     caption: Optional[str] = Form(default=None),
+    _: str = Depends(_optional_verify_reviewer),
 ) -> dict:
     """Ingest a photo and immediately run image analysis.
 
@@ -381,13 +422,9 @@ async def upload_image(
     image-analysis finding is returned right away so the uploader can verify the
     evidence was accepted.
     """
-    raw = await file.read()
+    raw = await _read_bounded(file, int(settings.max_upload_size_mb * 1024 * 1024))
     if not raw:
         raise HTTPException(status_code=400, detail="Empty image payload")
-    try:
-        media_store.validate_size(raw)
-    except ValueError as exc:
-        raise HTTPException(status_code=413, detail=str(exc)) from exc
     kind = media_type_for(file.filename or "evidence.png")
     if kind != "image":
         raise HTTPException(
@@ -454,6 +491,7 @@ async def upload_video(
     uploaded_by: str = Form(default="driver"),
     captured_at: Optional[str] = Form(default=None),
     caption: Optional[str] = Form(default=None),
+    _: str = Depends(_optional_verify_reviewer),
 ) -> dict:
     """Ingest a dashcam / cabin video and extract keyframes for the vision agent.
 
@@ -461,13 +499,9 @@ async def upload_video(
     frames are served back at ``/media/frames/...`` so a reviewer can scrub the
     exact frames the agent reasoned over.
     """
-    raw = await file.read()
+    raw = await _read_bounded(file, int(settings.max_upload_size_mb * 1024 * 1024))
     if not raw:
         raise HTTPException(status_code=400, detail="Empty video payload")
-    try:
-        media_store.validate_size(raw)
-    except ValueError as exc:
-        raise HTTPException(status_code=413, detail=str(exc)) from exc
     kind = media_type_for(file.filename or "clip.mp4")
     if kind != "video":
         raise HTTPException(
@@ -531,7 +565,9 @@ async def upload_video(
 
 
 @app.get("/media/uploads")
-async def list_uploads() -> dict:
+async def list_uploads(
+    _: str = Depends(_optional_verify_reviewer),
+) -> dict:
     """Everything uploaded so far, grouped by the case it is attached to."""
     return {
         "cases": media_store.all_keys(),
@@ -579,7 +615,9 @@ async def create_dispute(payload: DisputeRequest) -> DisputeAccepted:
 
 
 @app.post("/resolve", response_model=ResolutionResult)
-async def resolve_sync(payload: DisputeRequest) -> ResolutionResult:
+async def resolve_sync(
+    payload: DisputeRequest, _: str = Depends(_optional_verify_reviewer)
+) -> ResolutionResult:
     """Run arbitration to completion and return the result (no streaming)."""
     case = _resolve_case(payload)
     run = await orchestrator.arbitrate(case)
@@ -587,7 +625,9 @@ async def resolve_sync(payload: DisputeRequest) -> ResolutionResult:
 
 
 @app.get("/stream/{run_id}")
-async def stream_run(run_id: str) -> StreamingResponse:
+async def stream_run(
+    run_id: str, _: str = Depends(_optional_verify_reviewer)
+) -> StreamingResponse:
     run = broker.get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Unknown run '{run_id}'")
@@ -595,7 +635,9 @@ async def stream_run(run_id: str) -> StreamingResponse:
 
 
 @app.get("/stream")
-async def stream_latest() -> StreamingResponse:
+async def stream_latest(
+    _: str = Depends(_optional_verify_reviewer),
+) -> StreamingResponse:
     run = broker.get()
     if run is None:
         raise HTTPException(status_code=404, detail="No runs yet — POST /dispute first")
@@ -603,7 +645,9 @@ async def stream_latest() -> StreamingResponse:
 
 
 @app.get("/result/{run_id}", response_model=ResolutionResult)
-async def result(run_id: str) -> ResolutionResult:
+async def result(
+    run_id: str, _: str = Depends(_optional_verify_reviewer)
+) -> ResolutionResult:
     run = broker.get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Unknown run '{run_id}'")
@@ -700,7 +744,9 @@ async def override_run(
 
 
 @app.get("/precedents")
-async def precedents() -> dict:
+async def precedents(
+    _: str = Depends(_optional_verify_reviewer),
+) -> dict:
     """Current contents of the precedent knowledge base."""
     store = orchestrator.policy_agent.store
     return {
@@ -710,7 +756,9 @@ async def precedents() -> dict:
 
 
 @app.get("/escalations")
-async def escalations() -> dict:
+async def escalations(
+    _: str = Depends(_optional_verify_reviewer),
+) -> dict:
     """Runs halted by the escalation protocol and awaiting human review."""
     items = []
     for run in broker.runs.values():
@@ -750,12 +798,16 @@ async def api_health() -> dict:
 
 
 @app.get("/api/cases")
-async def api_cases() -> dict:
+async def api_cases(
+    _: str = Depends(_optional_verify_reviewer),
+) -> dict:
     return await cases()
 
 
 @app.get("/api/cases/{case_id}")
-async def api_case_detail(case_id: str) -> dict:
+async def api_case_detail(
+    case_id: str, _: str = Depends(_optional_verify_reviewer)
+) -> dict:
     return await case_detail(case_id)
 
 
@@ -765,22 +817,30 @@ async def api_create_dispute(payload: DisputeRequest) -> DisputeAccepted:
 
 
 @app.post("/api/resolve", response_model=ResolutionResult)
-async def api_resolve_sync(payload: DisputeRequest) -> ResolutionResult:
+async def api_resolve_sync(
+    payload: DisputeRequest, _: str = Depends(_optional_verify_reviewer)
+) -> ResolutionResult:
     return await resolve_sync(payload)
 
 
 @app.get("/api/stream/{run_id}")
-async def api_stream_run(run_id: str) -> StreamingResponse:
+async def api_stream_run(
+    run_id: str, _: str = Depends(_optional_verify_reviewer)
+) -> StreamingResponse:
     return await stream_run(run_id)
 
 
 @app.get("/api/stream")
-async def api_stream_latest() -> StreamingResponse:
+async def api_stream_latest(
+    _: str = Depends(_optional_verify_reviewer),
+) -> StreamingResponse:
     return await stream_latest()
 
 
 @app.get("/api/result/{run_id}", response_model=ResolutionResult)
-async def api_result(run_id: str) -> ResolutionResult:
+async def api_result(
+    run_id: str, _: str = Depends(_optional_verify_reviewer)
+) -> ResolutionResult:
     return await result(run_id)
 
 
@@ -818,12 +878,16 @@ async def api_approve_run(
 
 
 @app.get("/api/precedents")
-async def api_precedents() -> dict:
+async def api_precedents(
+    _: str = Depends(_optional_verify_reviewer),
+) -> dict:
     return await precedents()
 
 
 @app.get("/api/escalations")
-async def api_escalations() -> dict:
+async def api_escalations(
+    _: str = Depends(_optional_verify_reviewer),
+) -> dict:
     return await escalations()
 
 
@@ -835,6 +899,7 @@ async def api_upload_audio(
     captured_at: Optional[str] = Form(default=None),
     caption: Optional[str] = Form(default=None),
     transcript_hint: Optional[str] = Form(default=None),
+    _: str = Depends(_optional_verify_reviewer),
 ) -> dict:
     return await upload_audio(file, case_id, uploaded_by, captured_at, caption, transcript_hint)
 
@@ -846,6 +911,7 @@ async def api_upload_image(
     uploaded_by: str = Form(default="rider"),
     captured_at: Optional[str] = Form(default=None),
     caption: Optional[str] = Form(default=None),
+    _: str = Depends(_optional_verify_reviewer),
 ) -> dict:
     return await upload_image(file, case_id, uploaded_by, captured_at, caption)
 
@@ -857,12 +923,15 @@ async def api_upload_video(
     uploaded_by: str = Form(default="driver"),
     captured_at: Optional[str] = Form(default=None),
     caption: Optional[str] = Form(default=None),
+    _: str = Depends(_optional_verify_reviewer),
 ) -> dict:
     return await upload_video(file, case_id, uploaded_by, captured_at, caption)
 
 
 @app.get("/api/media/uploads")
-async def api_list_uploads() -> dict:
+async def api_list_uploads(
+    _: str = Depends(_optional_verify_reviewer),
+) -> dict:
     return await list_uploads()
 
 

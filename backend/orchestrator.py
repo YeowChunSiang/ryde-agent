@@ -191,13 +191,20 @@ class Orchestrator:
             return None
 
         previous = run.result.ruling.decision.value if run.result.ruling else None
-        precedent = self.policy_agent.learn_from_override(
+        precedent_result = self.policy_agent.learn_from_override(
             run.case,
             run.result.evidence,
             run.result.ruling,
             request,
             run_id,
         )
+
+        if precedent_result is not None:
+            precedent = precedent_result.case
+            persisted = precedent_result.persisted
+        else:
+            precedent = None
+            persisted = True
 
         from models import OverrideAccepted  # local import: avoids a cycle at import time
 
@@ -209,10 +216,17 @@ class Orchestrator:
             new_amount=request.amount,
             precedent_id=precedent.precedent_id if precedent else None,
             knowledge_base_size=self.knowledge_base_size,
+            persisted=persisted,
             message=(
-                f"Override recorded. Added precedent "
-                f"{precedent.precedent_id if precedent else '(none)'} to the knowledge base "
-                f"({self.knowledge_base_size} precedents now)."
+                (
+                    f"Override recorded. Added precedent "
+                    f"{precedent.precedent_id} to the knowledge base "
+                    f"({self.knowledge_base_size} precedents now)."
+                    if persisted
+                    else f"Override recorded in-memory but NOT persisted to disk — "
+                    f"precedent {precedent.precedent_id} may not survive a restart. "
+                    f"Check server logs."
+                )
                 if precedent
                 else "Override recorded without adding a precedent."
             ),

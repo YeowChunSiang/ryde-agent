@@ -613,6 +613,7 @@ class OverrideAccepted(_Strict):
     new_amount: float = 0.0
     precedent_id: Optional[str] = None
     knowledge_base_size: int = 0
+    persisted: bool = True
     message: str = ""
 
 

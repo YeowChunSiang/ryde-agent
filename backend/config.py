@@ -140,6 +140,17 @@ class Settings(BaseModel):
     port: int = 3000
     log_level: str = "info"
 
+    # --- Security ----------------------------------------------------------
+    require_auth: bool = Field(
+        default=False,
+        description=(
+            "When True, sensitive read endpoints (cases, results, streams, "
+            "precedents, escalations, media) require a valid reviewer Bearer "
+            "token. When False (default), all endpoints are open — suitable for "
+            "local demos. Set REQUIRE_AUTH=true for public deployment."
+        ),
+    )
+
     @property
     def adp_configured(self) -> bool:
         return bool(self.adp_app_key.strip())
@@ -208,4 +219,6 @@ def get_settings() -> Settings:
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "3000")),
         log_level=os.getenv("LOG_LEVEL", "info"),
+        require_auth=os.getenv("REQUIRE_AUTH", "false").strip().lower()
+        in ("1", "true", "yes"),
     )

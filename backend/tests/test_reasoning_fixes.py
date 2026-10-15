@@ -412,3 +412,83 @@ def test_precedent_persist_fails_gracefully_on_readonly(tmp_path):
         assert store.size >= 1
     finally:
         store_path.parent.chmod(0o755)
+
+
+# ---------------------------------------------------------------------------
+# Fix 1 — override API reports persistence failure
+# ---------------------------------------------------------------------------
+
+
+def test_override_reports_persistence_failure(client, monkeypatch):
+    """If precedent persistence fails, the override API must report
+    ``persisted=False`` so the reviewer knows the precedent was not saved."""
+    login_res = client.post(
+        "/login",
+        json={"email": "reviewer@ryde.com", "password": "admin2026"},
+    )
+    assert login_res.status_code == 200
+    token = login_res.json()["token"]
+
+    dispute_res = client.post("/dispute", json={"case_id": "DISP-006"})
+    assert dispute_res.status_code == 200
+    run_id = dispute_res.json()["run_id"]
+
+    import time
+
+    for _ in range(50):
+        result = client.get(f"/result/{run_id}").json()
+        if result.get("finished_at"):
+            break
+        time.sleep(0.1)
+
+    # Force persistence failure by monkeypatching _persist to return False.
+    store = main_mod.orchestrator.policy_agent.store
+    monkeypatch.setattr(store, "_persist", lambda: False)
+
+    res = client.post(
+        f"/override/{run_id}",
+        json={
+            "reviewer_id": "reviewer-01",
+            "decision": "refund_rider",
+            "amount": 10.0,
+            "rationale": "test persistence failure",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200, f"Expected 200, got {res.status_code}: {res.text}"
+    body = res.json()
+    assert body["persisted"] is False
+    assert "not" in body["message"].lower() and "persist" in body["message"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Fix 3 — sensitive endpoints gate behind auth when REQUIRE_AUTH is enabled
+# ---------------------------------------------------------------------------
+
+
+def test_sensitive_endpoints_require_auth_when_enabled(client, monkeypatch):
+    """When REQUIRE_AUTH is on, sensitive read endpoints must 401 without a token."""
+    monkeypatch.setattr(main_mod.settings, "require_auth", True)
+
+    for path in ("/cases", "/precedents", "/escalations", "/media/uploads"):
+        res = client.get(path)
+        assert res.status_code == 401, f"Expected 401 for {path}, got {res.status_code}"
+
+    # /health must stay open.
+    res = client.get("/health")
+    assert res.status_code == 200
+
+
+def test_sensitive_endpoints_accept_valid_token_when_enabled(client, monkeypatch):
+    """When REQUIRE_AUTH is on, a valid reviewer token grants access."""
+    monkeypatch.setattr(main_mod.settings, "require_auth", True)
+
+    login_res = client.post(
+        "/login",
+        json={"email": "reviewer@ryde.com", "password": "admin2026"},
+    )
+    assert login_res.status_code == 200
+    token = login_res.json()["token"]
+
+    res = client.get("/cases", headers={"Authorization": f"Bearer {token}"})
+    assert res.status_code == 200

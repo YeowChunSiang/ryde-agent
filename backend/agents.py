@@ -30,7 +30,7 @@ import time
 import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 logger = logging.getLogger("ryderesolve.precedents")
 
@@ -690,6 +690,13 @@ def _seed_precedents() -> list[PrecedentCase]:
     ]
 
 
+class PrecedentAddResult(NamedTuple):
+    """Result of adding a precedent: the case plus whether it was persisted."""
+
+    case: "PrecedentCase"
+    persisted: bool
+
+
 class PrecedentStore:
     """The knowledge base behind the Policy & Precedent Agent.
 
@@ -755,7 +762,7 @@ class PrecedentStore:
         _ = self.size  # force lazy load/seed
         return list(self.cases)
 
-    def add(self, case: PrecedentCase) -> PrecedentCase:
+    def add(self, case: PrecedentCase) -> PrecedentAddResult:
         _ = self.size
         self.cases.append(case)
         persisted = self._persist()
@@ -765,7 +772,7 @@ class PrecedentStore:
                 "the knowledge base may be inconsistent on restart.",
                 case.precedent_id,
             )
-        return case
+        return PrecedentAddResult(case=case, persisted=persisted)
 
     def reset(self) -> None:
         self.cases = _seed_precedents()
@@ -817,7 +824,7 @@ class PolicyPrecedentAgent:
         ruling: Ruling,
         request: OverrideRequest,
         run_id: str,
-    ) -> Optional[PrecedentCase]:
+    ) -> Optional[PrecedentAddResult]:
         """Absorb a human correction into the knowledge base."""
         if not request.add_to_knowledge_base:
             return None
