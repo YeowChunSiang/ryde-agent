@@ -15,69 +15,18 @@ in under a second and falls back to a human reviewer when the evidence is thin.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph Frontend
-        UI[React + Vite UI]
-    end
+![RydeResolve system architecture](docs/architecture.png)
 
-    subgraph Backend [FastAPI service :3000]
-        POST[POST /dispute]
-        OVR[POST /override/{run_id}]
-        SSE[GET /stream/{run_id}]
-        ORCH[Orchestrator<br/>deterministic state machine]
-        SLA[SLA & Routing Manager]
-        COL[Evidence Collection Agent<br/>async upstream fan-out]
-        EVD[Evidence Engine<br/>pure Python]
-        FRD[Fraud & Bad-Faith Agent]
-        PRC[Policy & Precedent Agent<br/>mock RAG]
-        VIS[Image Analysis Agent]
-        RAD[Rider Advocate]
-        DAD[Driver Advocate]
-        JDG[Judge Agent]
-        ESC[Escalation Gate]
-        LRN[Learning Feedback Loop]
-        LLM{{Tencent Cloud ADP<br/>wss.lke.tencentcloud.com}}
-        OFF[Offline Reasoner<br/>deterministic fallback]
-    end
+The diagram above is the canonical view: frontend (Login → Dashboard → Case
+Detail) → 13 FastAPI endpoints → 10-stage async state pipeline in
+`orchestrator.py` → confidence gate → either auto-resolved or escalated to a
+human reviewer → Approve / Override → learning feedback loop into
+`precedents.json`. Source-of-truth: `scripts/build_docs_assets.py`.
 
-    UI -- HTTP --> POST
-    UI -- HTTP --> OVR
-    UI -- SSE --> SSE
-    POST --> SLA
-    SLA --> ORCH
-    ORCH -- parallel --> COL
-    ORCH -- parallel --> FRD
-    ORCH -- parallel --> PRC
-    ORCH --> EVD
-    ORCH --> VIS
-    ORCH --> RAD
-    ORCH --> DAD
-    RAD --> LLM
-    DAD --> LLM
-    JDG --> LLM
-    FRD --> LLM
-    PRC --> LLM
-    LLM -. failures .-> OFF
-    RAD -. fallback .-> OFF
-    DAD -. fallback .-> OFF
-    JDG -. fallback .-> OFF
-    FRD -. fallback .-> OFF
-    PRC -. fallback .-> OFF
-    ORCH --> JDG
-    JDG --> ESC
-    OVR --> LRN
-    LRN --> PRC
-    SSE -- event:info/evidence/argument/ruling/warning --> UI
-```
-
-Every arrow above corresponds to a discrete, loggable state transition — the
-agents' conversation is observable in real time through the SSE stream.
-
-Pipeline order: **intake → SLA routing → (evidence + collection + fraud +
-precedent, run concurrently) → vision → parallel advocacy → arbitration →
-escalation gate**, with the override endpoint closing the loop back into the
-precedent knowledge base.
+Pipeline order: **intake → SLA routing → media ingestion (ASR + keyframes) →
+evidence → external collection (parallel) → fraud + precedent (parallel) →
+vision → parallel advocacy → arbitration → escalation gate**, with the
+override endpoint closing the loop back into the precedent knowledge base.
 
 ## Project layout
 
@@ -91,22 +40,33 @@ backend/
   agents.py          SLA router, collection agent, fraud agent, precedent RAG
   adp_client.py      LLMProvider protocol, ADP SSE client, OfflineReasoner
   orchestrator.py    Async state pipeline, run broker, SSE generator, overrides
-  cases.py           DISP-001..005 sample datasets
+  cases.py           DISP-001..007 sample datasets (4 historical + 3 incoming)
   data/precedents.json  precedent knowledge base (gitignored, grows at runtime)
+  trtc_client.py     TRTC ASR + simulated fallback, hostility scoring
+  vision_utils.py    ffmpeg→OpenCV keyframe extraction + integrity signals
+  media_store.py     upload persistence + MIME routing
 frontend/
   src/
-    pages/Index.tsx          main page
+    pages/Index.tsx          main case-detail page (pipeline rail, evidence, advocates, verdict)
+    pages/Dashboard.tsx      Reviewer Portal — KPI cards, New/Archived tabs, SLA-sorted queue
+    pages/Login.tsx          Mock auth screen (reviewer@ryde.com / admin2026)
+    pages/NotFound.tsx
     components/CaseRail.tsx          left rail
-    components/PipelineRail.tsx      progress rail (9 stages)
+    components/PipelineRail.tsx      10-stage progress rail
     components/AgentStream.tsx       live SSE feed
-    components/EvidencePanel.tsx     facts + policy + risk + vision
+    components/EvidencePanel.tsx     facts + policy + risk + vision + media players
     components/RiskPanel.tsx         SLA routing, collection, fraud, precedents
     components/AdvocatesPanel.tsx    rider vs driver cards
     components/VerdictPanel.tsx      ruling + confidence + summaries
-    components/EscalationPanel.tsx   escalation packet + human override form
-    components/agent-meta.ts         shared color/metadata
-    types/index.ts                   mirror of backend schemas
+    components/EscalationPanel.tsx   escalation packet + Approve/Override
+    components/DisputeTable.tsx      SLA-sorted queue rows (New + Archived)
+    components/CasePersistenceContext.tsx  per-case localStorage cache
+    components/ReviewerNav.tsx       status pills (reasoner/ADP/keyframes/ASR/KB) + reviewer badge
+    components/agent-meta.ts         shared color/metadata + Miora avatar paths
+    types/index.ts                   mirror of backend schemas + STAGES
     lib/api.ts                       typed API + EventSource client
+  public/assets/miora/             Miora case images, audio, video
+  public/assets/miora/agents/      13 Miora-generated agent avatars
 ```
 
 ## Running it
@@ -228,8 +188,8 @@ credentials — and so it can be A/B-tested against a baseline ruling
 | `DISP-003` | Property Damage | high     | **NO ACTION** + escalated to Fraud & Safety (fake photo) |
 | `DISP-004` | Property Damage | high     | **COMPENSATE DRIVER** — $60 cleaning fee awarded      |
 | `DISP-005` | Safety Incident | critical | **ESCALATED TO HUMAN** — never auto-resolved          |
-| `DISP-006` | Safety Incident | critical | **ESCALATED TO HUMAN** — TRTC ASR threat detected     |
-| `DISP-007` | Property Damage | high     | **COMPENSATE DRIVER** — $60, keyframes corroborate spill |
+| `DISP-006` | Safety Incident | high     | **ESCALATED TO HUMAN** — heated cabin-temperature argument, no explicit threat |
+| `DISP-007` | Safety Incident | critical | **ESCALATED TO HUMAN** — instant suspension, safety ticket, law-enforcement referral |
 
 ## Stretch goals implemented
 
@@ -260,7 +220,7 @@ credentials — and so it can be A/B-tested against a baseline ruling
   and the growing KB size.
 
 All six agents emit events on the SSE stream, and the console renders them in
-the 9-stage pipeline rail and the **Risk & RAG** tab.
+the 10-stage pipeline rail and the **Risk & RAG** tab.
 
 ## Phase 3: multi-modal evidence pipeline
 
@@ -288,10 +248,10 @@ Two new sample cases exercise the new agents end-to-end:
 
 | Case | Type | Pipeline | Expected ruling |
 |------|------|----------|-----------------|
-| `DISP-006` | `safety_incident` | TRTC ASR transcribes a 42 s in-app safety recording into 5 turns; hostility 1.00, explicit threat flagged. | **ESCALATE TO HUMAN** (mandatory under policy `SAFETY-1/2`) |
-| `DISP-007` | `property_damage` | 6 s cabin video decoded into 6 keyframes; `EXIF Δ 2 min` inside the 45 min window; severity `liquid_spill`. | **COMPENSATE DRIVER — $60**, ruling cites the extracted keyframes |
+| `DISP-006` | `safety_incident` (verbal, AC argument) | TRTC ASR transcribes an 8 s covert recording into 3 turns (rider / rider / driver) on cabin temperature; hostility high, no explicit threat. | **ESCALATE TO HUMAN** (mandatory under policy `SAFETY-1/2`) |
+| `DISP-007` | `safety_incident` (physical/sexual harassment) | 12 s low-light cabin video decoded into 12 keyframes; night footage integrity flag, physical-contact anomaly across frames. | **ESCALATE TO HUMAN** — instant driver suspension, safety ticket, law-enforcement referral |
 
-All eight agents now emit on the SSE stream and the console renders them in the
+All thirteen agents now emit on the SSE stream and the console renders them in the
 **10-stage** pipeline rail (the new `Media Ingestion` stage sits between SLA
 routing and evidence extraction). The Evidence tab adds:
 
@@ -307,12 +267,58 @@ routing and evidence extraction). The Evidence tab adds:
   `frontend/public/assets/miora/agents/`), including the new
   `asr.png` for the TRTC stage.
 
+## Phase 3.2: Human Reviewer Portal
+
+A role-based interface for operations reviewers, sitting on top of the
+multi-modal pipeline. Login, then the dashboard, then a case detail view
+with Approve / Override tied to the Learning Feedback Loop.
+
+* **Auth (mock)** — `/login` accepts `reviewer@ryde.com` / `admin2026` and
+  returns a session id stored in `localStorage`. The top nav shows the
+  reviewer badge and a sign-out button.
+* **Automated background arbitration** — the dashboard's `New` tab
+  auto-runs any unresolved case in the background; the row dot cycles
+  `pending` → `processing` → `resolved` / `escalated` and is replaced by
+  the verdict once cached.
+* **SLA + value-based queue** — `DisputeTable.tsx` sorts by `sla_priority`
+  (`critical` > `high` > `normal` > `low`) then `financial_value` desc,
+  and surfaces red escalation badges, AUDIO/VIDEO/IMAGE chips, and the
+  four KPI cards (Escalated / Critical / Awaiting review / Closed &
+  Archived).
+* **Two sections, not one** — "Action Required: Escalated Cases" sits
+  above "Standard Agent Determinations (Awaiting Review)".
+* **Approve / Override** — `EscalationPanel.tsx` calls
+  `POST /api/approve/{run_id}` (one-click close + audit row) or
+  `POST /api/override/{run_id}` (modal: pick alternative ruling + free
+  text, writes a new precedent into the KB and returns the new KB size).
+  The case moves to the **Archived** tab with a full audit row.
+* **State persistence** — `CasePersistenceContext.tsx` caches per
+  `case_id` (storage key `ryderesolve.case-store.v3`): full SSE event
+  log, telemetry facts, vision findings, both advocate arguments, judge
+  verdict + confidence, escalation packet, audio/video keyframe state.
+  Switching tabs / cases restores instantly with no re-run.
+* **Archived UX** — the Archived view shows the reviewed-verdict badge
+  (`Approved by … · YYYY-MM-DD` / `Overridden by …`) rather than a
+  "Re-run Arbitration" button, so reviewers see exactly the version the
+  human reviewer reviewed.
+* **Status pills at the top** — `reasoner` (offline/adp), `ADP` (offline
+  / configured), `KB` (precedent count), `keyframes` (ffmpeg/opencv),
+  `ASR` (trtc/simulated). These are deliberate, not errors — the
+  offline reasoner is the intended demo path.
+
+## Build log
+
+A consolidated record of every phase's intent, what was shipped, the
+latest fixes, and the open gaps lives in [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md).
+
 ### Testing
 
 ```bash
-# 25-test regression suite (ASR scoring, keyframe extraction, upload
+# 31-test regression suite (ASR scoring, keyframe extraction, upload
 # endpoints, DISP-006/007 end-to-end, 7-case regression, Miora asset audit)
-cd /workspace && python3 -m pytest backend/tests -q
+# IMPORTANT: run from inside backend/ — cases.py resolves Miora asset paths
+# relative to the cwd.
+cd backend && python3 -m pytest tests -q
 
 # Headless Chromium smoke: video player renders, keyframes decode, audio
 # player renders, all Miora avatars load, no JS errors
@@ -343,7 +349,7 @@ work without any external network calls.
 | `TRTC_SECRET_ID` / `TRTC_SECRET_KEY` | (empty) | Live TRTC ASR; empty = simulated client       |
 | `TRTC_APP_ID`                    | (empty) | TRTC application id (optional)                  |
 | `TRTC_ASR_ENDPOINT`              | `https://asr.tencentcloud.com` | TRTC ASR endpoint             |
-| `TRTC_TIMEOUT_S`                 | `15`    | TRTC request timeout                             |
+| `TRTC_TIMEOUT_S`                 | `30.0` | TRTC request timeout                           |
 | `MEDIA_DIR`                      | `data/uploads` | Where uploaded audio/video are parked    |
 | `FRAME_DIR`                      | `data/frames`   | Where extracted keyframes are written   |
 | `VIDEO_FRAME_FPS`                | `1.0`   | Keyframe sampling rate                           |

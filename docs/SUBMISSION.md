@@ -30,16 +30,18 @@ Fill the entries below into the submission form.
   opacity, scalability.
 
 ### Comprehensive solution design
-- **Business architecture:** ten-agent arbitration pipeline (SLA routing →
-  **TRTC media ingestion (ASR + keyframes)** → evidence + collection + fraud
-  + precedent in parallel → vision → parallel rider/driver advocates → judge
-  → escalation gate) with a human-in-the-loop override that feeds a learning
-  loop.
+- **Business architecture:** 13-agent / 10-stage arbitration pipeline
+  (intake → SLA routing → **TRTC media ingestion (ASR + keyframes)** →
+  evidence + collection + fraud + precedent in parallel → vision →
+  parallel rider/driver advocates → judge → escalation gate) with a
+  human-in-the-loop override that feeds a learning loop.
 - **Technical architecture:** pure Python 3.11 + FastAPI + Pydantic v2 +
   httpx; React 19 + Vite + shadcn/ui console. Tencent Cloud TRTC for ASR
   (with a deterministic simulated client fallback) and `ffmpeg-python` for
   keyframe extraction. Tennet Cloud ADP for inference (with a deterministic
   offline reasoner fallback so the demo works without credentials).
+
+![System architecture](architecture.png)
 - **How prompts drive AI generation:** every agent system prompt pins
   its model call to a strict JSON output contract; the LLM is *only*
   allowed to argue over facts that Python already computed, never to
@@ -88,12 +90,19 @@ This conversation log is the proof.
 5. `05_full_pipeline_stream.png` — the live inter-agent
    communication feed (the observability requirement).
 6. `06_disp006_audio.png` — TRTC ASR pipeline: the in-app safety
-   recording is transcribed into 5 turns, the threat is flagged,
-   the judge escalates the case and references the transcript in
-   `key_findings`.
-7. `07_disp007_video.png` — Vision Agent upgrade: a 6 s cabin clip is
-   decomposed into 6 keyframes at 1 fps; the ruling cites the keyframes
-   and awards the $60 cleaning fee against a `liquid_spill` verdict.
+   recording is transcribed into 3 turns (rider / rider / driver) on cabin
+   temperature, the case is flagged `escalated` and the judge references
+   the transcript in `key_findings`. The transcript is driven by the
+   sidecar `disp006_arguement.txt` next to the MP3.
+7. `07_disp007_video.png` (and `09_disp007_video_evidence.png`) — Vision
+   Agent upgrade: a 12 s low-light covert cabin recording is decomposed
+   into 12 keyframes at 1 fps; the case is CRITICAL and the ruling
+   recommends instant driver suspension, a priority safety ticket and a
+   law-enforcement referral.
+8. `08_reviewer_portal_dashboard.png` — the new Reviewer Portal: KPI
+   cards (Escalated / Critical / Awaiting review / Closed & Archived),
+   the New/Archived tabs, the "Action Required: Escalated Cases"
+   section, and the SLA pills at the top.
 
 ## Project link
 Set `ADP_APP_KEY` and run `python -m uvicorn main:app --port 3000`
