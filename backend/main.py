@@ -35,7 +35,7 @@ from typing import AsyncIterator, Optional
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from cases import CASE_REGISTRY, get_case, list_cases
@@ -964,7 +964,34 @@ logger.info(
 # ---------------------------------------------------------------------------
 
 if FRONTEND_DIST.is_dir():
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="static")
+    # Hashed build output is served by StaticFiles (cache/etag friendly);
+    # everything else falls through to the SPA shell below.
+    _spa_assets = FRONTEND_DIST / "assets"
+    if _spa_assets.is_dir():
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(_spa_assets)),
+            name="spa-assets",
+        )
+
+    _spa_index = FRONTEND_DIST / "index.html"
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str) -> FileResponse:
+        """Serve the built SPA, falling back to ``index.html``.
+
+        The console is a BrowserRouter app, so ``/login``, ``/dashboard`` and
+        ``/review`` have to resolve to the shell on a hard refresh or when the
+        link is opened directly. Unknown ``/api`` paths still 404 as JSON.
+        """
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        if full_path:
+            candidate = (FRONTEND_DIST / full_path).resolve()
+            if candidate.is_file() and FRONTEND_DIST in candidate.parents:
+                return FileResponse(candidate)
+        return FileResponse(_spa_index)
+
     logger.info("Serving built frontend from %s", FRONTEND_DIST)
 
 
