@@ -3,7 +3,7 @@
 ## Project title
 **RydeResolve**
 
-## Short blurb (≤ 10 words)
+## Short blurb
 > Multi-agent autonomous dispute resolution for ride-hailing.
 
 ## Project description
@@ -95,7 +95,7 @@ How to run:
 
 ```bash
 cd backend && python3 -m uvicorn main:app --port 3000          # API
-cd frontend && pnpm dev                                          # console (Vite proxies /api)
+cd frontend && pnpm dev                                        # console (Vite proxies /api)
 # or build once and serve everything from FastAPI on one port:
 cd frontend && pnpm build && cd ../backend && python3 -m uvicorn main:app --port 3000
 ```
@@ -142,35 +142,10 @@ panels populate.
    section, and the SLA pills at the top.
 
 ## Demo walkthrough video
-> **5–8 minute live demo, recorded by the author.** Recommended filename:
-> `docs/demo_walkthrough.mp4` (then drop the line below into this section):
->
+> **Live demo** 
 > ```markdown
 > ![Demo walkthrough](./demo_walkthrough.mp4)
 > ```
->
-> Suggested storyboard (5–8 min):
-> 1. **Project overview (0:00–1:00)** — problem, target users, headline stat
->    ("24–72 h → < 1 s, confidence-gated escalation").
-> 2. **Architecture walk-through (1:00–2:30)** — show
->    `docs/architecture_diagram.png`; explain the 13 agents, 10 stages,
->    side services, escalation gate and learning loop.
-> 3. **Core agent features & how to use (2:30–6:00)** — live screen capture
->    of <https://a3e35f2feabc741ad.sg.agentos-app.run>:
->    - log in as `reviewer / reviewer`;
->    - open `DISP-002`, click **Run arbitration**, watch the SSE pipeline
->      rail (intake → SLA → media → evidence → collection → fraud → RAG →
->      vision → advocacy → judge) light up, ending in CHARGE UPHELD @ 88%;
->    - open `DISP-007`, show the in-app video player under **Evidence**,
->      the 12 keyframes at 1 fps and the resulting critical escalation;
->    - open `DISP-001` (route deviation) and `DISP-003` (fabricated
->      photo) to demonstrate the *rejection* paths.
-> 4. **Build reflection & CodeBuddy / WorkBuddy tips (6:00–7:30)** — how
->    the pipeline was iterated (Phase 1 → 2 → 3 → 3.1 → 3.2), the trick of
->    splitting a sidecar transcript next to the audio asset, the SPA
->    fallback patch, and the lessons learned about offline-first
->    deterministic reasoning.
-> 5. **Outro (7:30–8:00)** — link to GitHub repo and the live URL.
 
 ## Project link
 - **Live deployment (reviewer portal):**
@@ -182,5 +157,5 @@ panels populate.
   ```bash
   cd backend && python3 -m uvicorn main:app --port 3000        # API + static console
   # or for hot-reload:
-  cd frontend && pnpm dev                                       # Vite proxies /api → :3000
+  cd frontend && pnpm dev                                      # Vite proxies /api → :3000
   ```
