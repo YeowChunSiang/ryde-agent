@@ -167,7 +167,7 @@ def build_architecture() -> str:
     parts.append(
         f'<text x="40" y="44" font-family="Inter, system-ui, sans-serif" '
         f'font-size="26" font-weight="700" fill="{TEXT}">'
-        f'RydeResolve — System Architecture</text>'
+        f'RYsolve — System Architecture</text>'
     )
     parts.append(
         f'<text x="40" y="68" font-family="Inter, system-ui, sans-serif" '
@@ -514,7 +514,7 @@ def build_cover() -> str:
     parts.append(
         f'<text x="108" y="78" font-family="Inter, system-ui, sans-serif" '
         f'font-size="36" font-weight="800" fill="{TEXT}">'
-        f'RydeResolve</text>'
+        f'RYsolve</text>'
     )
     parts.append(
         f'<text x="108" y="100" font-family="Inter, system-ui, sans-serif" '

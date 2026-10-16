@@ -1,4 +1,4 @@
-"""Runtime configuration for the RydeResolve dispute resolution backend.
+"""Runtime configuration for the RYsolve dispute resolution backend.
 
 Configuration is read from environment variables (12-factor) with sane defaults so
 the service boots with zero setup. When no Tencent Cloud ADP ``AppKey`` is present

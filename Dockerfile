@@ -1,4 +1,4 @@
-# RydeResolve — single-port container image (FastAPI serves API + built React console)
+# RYsolve — single-port container image (FastAPI serves API + built React console)
 #
 # Build:  docker build -t ryderesolve:latest .
 # Run:    docker run -p 8080:8080 -e PORT=8080 ryderesolve:latest

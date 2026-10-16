@@ -1,4 +1,4 @@
-# RydeResolve — Build Log & Implementation Record
+# RYsolve — Build Log & Implementation Record
 
 > The single source of truth for what has been built, what each phase was
 > supposed to do, and where the current implementation deviates from the
@@ -15,7 +15,7 @@
 
 | Item                              | Current state                                              |
 | --------------------------------- | ---------------------------------------------------------- |
-| Product                           | **RydeResolve** — multi-agent autonomous dispute arbitration |
+| Product                           | **RYsolve** — multi-agent autonomous dispute arbitration |
 | Track                             | Tencent Cloud AI Singapore Hackathon 2026 (Ryde prompt)     |
 | Backend                           | FastAPI + Pydantic v2 + httpx SSE, pure Python (no LangGraph/AutoGen/CrewAI) |
 | Frontend                          | React 19 + Vite + shadcn/ui, single-port deployable        |
@@ -403,7 +403,7 @@ correctness pass `880aa20 → 5f1a174 → 6fd047b → 76de67d → b729d62 → 2b
 
 ---
 
-# Starting Prompt: Miora Asset Generation Prompts: RydeResolve Mock Evidence
+# Starting Prompt: Miora Asset Generation Prompts: RYsolve Mock Evidence
 
 **System Context:**
 You are generating production-grade mock evidence assets (images, video, and audio) for a ride-hailing dispute resolution dashboard. The assets must look highly realistic, simulating smartphone screenshots, native app interfaces, and raw dashcam media.

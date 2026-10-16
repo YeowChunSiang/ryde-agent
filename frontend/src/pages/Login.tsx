@@ -44,7 +44,7 @@ export default function Login() {
             <Cpu className="h-4 w-4" />
           </div>
           <div>
-            <h1 className="text-base font-bold leading-none tracking-tight">RydeResolve</h1>
+            <h1 className="text-base font-bold leading-none tracking-tight">RYsolve</h1>
             <p className="mt-1 text-[11px] leading-none text-muted-foreground">
               Human Reviewer Portal
             </p>

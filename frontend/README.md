@@ -1,4 +1,4 @@
-# RydeResolve frontend
+# RYsolve frontend
 
 A React + Vite + shadcn/ui console that consumes the backend's SSE stream and
 exposes the arbitration pipeline as a live "ops console".

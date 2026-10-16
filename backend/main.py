@@ -1,4 +1,4 @@
-"""FastAPI application — RydeResolve multi-agent dispute resolution service.
+"""FastAPI application — RYsolve multi-agent dispute resolution service.
 
 Endpoints (mounted both at ``/`` and ``/api`` so the Vite dev proxy and direct
 calls both work):
@@ -163,7 +163,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="RydeResolve",
+    title="RYsolve",
     description=(
         "Multi-agent autonomous dispute resolution for ride-hailing: parallel rider/driver "
         "advocates, an impartial judge, a forensic vision agent and a confidence-gated "
@@ -285,7 +285,7 @@ async def _read_bounded(
 async def health() -> dict:
     return {
         "status": "ok",
-        "service": "RydeResolve",
+        "service": "RYsolve",
         "engine": orchestrator.engine,
         "adp_configured": settings.adp_configured,
         "escalation_threshold": settings.confidence_escalation_threshold,

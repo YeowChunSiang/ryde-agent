@@ -1,6 +1,6 @@
 """Deterministic evidence extraction.
 
-Design note (this is the architectural spine of RydeResolve):
+Design note (this is the architectural spine of RYsolve):
 
 Advocates and the judge are **never** handed the raw dispute JSON and asked to
 "figure it out". Every quantitative claim is computed here in plain Python first,

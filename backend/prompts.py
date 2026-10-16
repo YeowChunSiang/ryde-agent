@@ -1,4 +1,4 @@
-"""System prompts and prompt builders for the RydeResolve agent pipeline.
+"""System prompts and prompt builders for the RYsolve agent pipeline.
 
 Each agent is pinned to a strict JSON output contract so the orchestrator can
 parse, validate and stream its output without brittle regex scraping. The

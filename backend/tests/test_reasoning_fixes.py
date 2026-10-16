@@ -1,6 +1,6 @@
 """Regression tests for the bug-audit fixes.
 
-These tests reproduce the specific bugs identified in the RydeResolve bug audit
+These tests reproduce the specific bugs identified in the RYsolve bug audit
 and verify that the fixes prevent the original incorrect behaviour.
 
 Run from the repository root::

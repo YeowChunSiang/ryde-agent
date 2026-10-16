@@ -1,4 +1,4 @@
-"""Pydantic v2 schemas for the RydeResolve multi-agent dispute resolution system.
+"""Pydantic v2 schemas for the RYsolve multi-agent dispute resolution system.
 
 The domain models mirror the ``DISP-002`` No-Show Charge dataset shipped with the
 Ryde problem statement (``dispute_ticket``, ``rider_profile``, ``driver_profile``,

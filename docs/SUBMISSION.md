@@ -1,7 +1,7 @@
-# Hackathon submission sheet — RydeResolve
+# Hackathon submission sheet — RYsolve
 
 ## Project title
-**RydeResolve**
+**RYsolve**
 
 ## Short blurb
 > Multi-agent autonomous dispute resolution for ride-hailing.

@@ -1,4 +1,4 @@
-# RydeResolve — Multi-Agent Autonomous Dispute Resolution
+# RYsolve — Multi-Agent Autonomous Dispute Resolution
 
 > A multi-agent arbitration backend + live observability console for ride-hailing
 > disputes. Built for the **Tencent Cloud AI Singapore Hackathon 2026** (Ryde
@@ -9,13 +9,13 @@
 Ride-hailing platforms process thousands of dispute tickets a day — fare
 disputes, route deviations, no-show charges, property damage. Today every one
 of them waits 24–72 hours for a human agent to read GPS pings, chat logs and
-photos, then write up a ruling. RydeResolve replaces that with an **explicit,
+photos, then write up a ruling. RYsolve replaces that with an **explicit,
 auditable, state-pipelined multi-agent system** that issues a defensible ruling
 in under a second and falls back to a human reviewer when the evidence is thin.
 
 ## Architecture
 
-![RydeResolve system architecture](docs/architecture.png)
+![RYsolve system architecture](docs/architecture.png)
 
 The diagram above is the canonical view: frontend (Login → Dashboard → Case
 Detail) → 13 FastAPI endpoints → 10-stage async state pipeline in
@@ -372,7 +372,7 @@ work without any external network calls.
 
 ## Submitting to the hackathon
 
-* Project title: **RydeResolve**
+* Project title: **RYsolve**
 * Short blurb: *Multi-agent autonomous dispute resolution for ride-hailing.*
 * Architecture diagram: see above.
 * Live demo URL: deploy `frontend/dist` + `backend` as one process and share

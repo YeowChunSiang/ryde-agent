@@ -1,4 +1,4 @@
-# RydeResolve backend
+# RYsolve backend
 
 The four files listed in the Ryde problem statement, plus a few supporting
 modules, run a deterministic multi-agent arbitration pipeline.

@@ -1021,7 +1021,7 @@ async def event_stream(
     """Yield SSE frames for a run, replaying history then following live."""
     index = 0
     waited = 0.0
-    yield ": connected to RydeResolve arbitration stream\n\n"
+    yield ": connected to RYsolve arbitration stream\n\n"
     while True:
         while index < len(run.events):
             yield sse_frame(run.events[index])

@@ -384,7 +384,7 @@ export default function Dashboard() {
             <Cpu className="h-4 w-4" />
           </div>
           <div>
-            <h1 className="text-base font-bold leading-none tracking-tight">RydeResolve</h1>
+            <h1 className="text-base font-bold leading-none tracking-tight">RYsolve</h1>
             <p className="mt-0.5 text-[11px] text-muted-foreground">
               Human Reviewer Portal · SLA queue
             </p>

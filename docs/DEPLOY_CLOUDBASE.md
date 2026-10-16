@@ -1,6 +1,6 @@
-# Deploying RydeResolve to Tencent CloudBase (云托管 / CloudRun)
+# Deploying RYsolve to Tencent CloudBase (云托管 / CloudRun)
 
-RydeResolve runs as **one HTTP port**: FastAPI serves both the JSON API and the
+RYsolve runs as **one HTTP port**: FastAPI serves both the JSON API and the
 built React console (`frontend/dist`). That makes it a direct fit for
 **CloudBase 云托管 (CloudRun)**, which only needs a container that listens on a
 single port.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Restart the RydeResolve backend (uvicorn) in the background.
+# Restart the RYsolve backend (uvicorn) in the background.
 set -u
 cd /workspace/backend || exit 1
 
