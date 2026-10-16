@@ -141,12 +141,6 @@ panels populate.
    the New/Archived tabs, the "Action Required: Escalated Cases"
    section, and the SLA pills at the top.
 
-## Demo walkthrough video
-> **Live demo** 
-> ```markdown
-> ![Demo walkthrough](./demo_walkthrough.mp4)
-> ```
-
 ## Project link
 - **Live deployment (reviewer portal):**
   <https://a3e35f2feabc741ad.sg.agentos-app.run>
